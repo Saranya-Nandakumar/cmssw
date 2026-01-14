@@ -43,6 +43,7 @@ namespace calibPixel {
       }
       for (auto i : cms::alpakatools::uniform_elements(acc, phase1PixelTopology::numberOfModules)) {
         clus_view[i].clusInModule() = 0;
+        clus_view[i].nFakeDigis() = 0;
       }
 
       for (auto i : cms::alpakatools::uniform_elements(acc, numElements)) {
@@ -108,6 +109,7 @@ namespace calibPixel {
 
       for (uint32_t i : cms::alpakatools::uniform_elements(acc, phase2PixelTopology::numberOfModules)) {
         clus_view[i].clusInModule() = 0;
+        clus_view[i].nFakeDigis() = 0;
       }
 
       for (uint32_t i : cms::alpakatools::uniform_elements(acc, numElements)) {

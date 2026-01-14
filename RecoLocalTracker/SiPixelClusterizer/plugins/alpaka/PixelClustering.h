@@ -808,6 +808,7 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         if (cms::alpakatools::once_per_block(acc)) {
           clus_view[thisModuleId].clusInModule() = foundClusters;
           clus_view[module].moduleId() = thisModuleId;
+          clus_view[thisModuleId].nFakeDigis() = fakePixels;  // Store fake digi count for monitoring
 #ifdef GPU_DEBUG
           if (foundClusters > gMaxHit) {
             gMaxHit = foundClusters;

@@ -7,7 +7,8 @@ GENERATE_SOA_LAYOUT(SiPixelClustersLayout,
                     SOA_COLUMN(uint32_t, moduleStart),
                     SOA_COLUMN(uint32_t, clusInModule),
                     SOA_COLUMN(uint32_t, moduleId),
-                    SOA_COLUMN(uint32_t, clusModuleStart))
+                    SOA_COLUMN(uint32_t, clusModuleStart),
+                    SOA_COLUMN(uint32_t, nFakeDigis))  // Number of fake/recovered digis per module
 
 using SiPixelClustersSoA = SiPixelClustersLayout<>;
 using SiPixelClustersSoAView = SiPixelClustersSoA::View;
