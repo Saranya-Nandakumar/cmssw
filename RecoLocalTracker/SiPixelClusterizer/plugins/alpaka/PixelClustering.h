@@ -21,7 +21,7 @@
 //#define GPU_DEBUG
 
 // TODO move to HeterogeneousCore/AlpakaInterface or upstream to alpaka
-template <alpaka::concepts::Acc TAcc, typename T>
+template <typename TAcc, typename T>
 ALPAKA_FN_ACC inline T atomicLoadFromShared(TAcc const& acc [[maybe_unused]], T* arg) {
 #if defined(ALPAKA_ACC_GPU_CUDA_ENABLED) or defined(ALPAKA_ACC_GPU_HIP_ENABLED)
   // GPU backend, use a volatile read to force a non-cached acess
@@ -808,6 +808,8 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         if (cms::alpakatools::once_per_block(acc)) {
           clus_view[thisModuleId].clusInModule() = foundClusters;
           clus_view[module].moduleId() = thisModuleId;
+          clus_view[thisModuleId].nFakeDigis() = fakePixels;  // Store fake digi count for monitoring
+          clus_view[thisModuleId].rawId() = rawModuleId;      // Store DetId for monitoring
 #ifdef GPU_DEBUG
           if (foundClusters > gMaxHit) {
             gMaxHit = foundClusters;
