@@ -29,25 +29,27 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
                                             edm::EventSetup const& iSetup) {
   iBooker.setCurrentFolder(topFolderName_ + "/FakeDigis");
 
+  // Remove maxFakesCount and set y-axis maximums to a very large value to avoid capping
+
   // Event-level histograms
   meFakeDigisPerEvent_ = iBooker.book1D("FakeDigisPerEvent",
                                       "Number of Fake Digis per Event;Fake Digis;Events",
                                       500,
                                       0.,
-                                      5000.);
+                                      8000.);
 
   // Module-level histograms
-  meFakeDigisPerModule_ = iBooker.book1D("FakeDigisPerModule",
-                                        "Number of Fake Digis per Module;Fake Digis;Modules",
-                                        100,
-                                        0.,
-                                        100.);
+    meFakeDigisPerModule_ = iBooker.book1D("FakeDigisPerModule",
+                                          "Number of Fake Digis per Module;Fake Digis;Modules (RawID)",
+                                          2000,
+                                          0.,
+                                          8000.);
 
   meFakeDigisPerModuleBarrel_ = iBooker.book1D("FakeDigisPerModuleBarrel",
                                                "Fake Digis per Module (Barrel);Fake Digis;Modules",
                                                100,
                                                0.,
-                                               100.);
+                                               8000.);
 
   meModulesWithFakeDigis_ = iBooker.book1D("ModulesWithFakeDigis",
                                            "Number of Modules with Fake Digis;Modules;Events",
@@ -67,14 +69,14 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
                                        "Number of Fake Digis (Barrel);Fake Digis;Events",
                                        500,
                                        0.,
-                                       5000.);
+                                       8000.);
 
   // Per-layer histograms
   iBooker.setCurrentFolder(topFolderName_ + "/FakeDigis/Barrel");
   for (int i = 0; i < 4; i++) {
     std::string hname = "NFakeDigisLayer" + std::to_string(i + 1);
     std::string htitle = "Number of Fake Digis (Layer " + std::to_string(i + 1) + ");Fake Digis;Events";
-    meNFakeDigisLayer_[i] = iBooker.book1D(hname, htitle, 200, 0., 2000.);
+    meNFakeDigisLayer_[i] = iBooker.book1D(hname, htitle, 200, 0., 8000.);
   }
 
   // Per-disk histograms
@@ -82,7 +84,7 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
   for (int i = 0; i < 3; i++) {
     std::string hname = "NFakeDigisDisk" + std::to_string(i + 1);
     std::string htitle = "Number of Fake Digis (Disk " + std::to_string(i + 1) + " +/-);Fake Digis;Events";
-    meNFakeDigisDisk_[i] = iBooker.book1D(hname, htitle, 200, 0., 2000.);
+    meNFakeDigisDisk_[i] = iBooker.book1D(hname, htitle, 200, 0., 8000.);
   }
 
   // Occupancy maps
@@ -105,7 +107,7 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
                                                   0.,
                                                   2000.,
                                                   0.,
-                                                  5000.);
+                                                  8000.);
   
   meFakeDigisFractionVsLS_ = iBooker.bookProfile("FakeDigisFractionVsLS",
                                                   "Fake Digis Fraction vs LS;Lumisection;Fake Fraction",
