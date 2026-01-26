@@ -45,6 +45,7 @@ namespace calibPixel {
         clus_view[i].clusInModule() = 0;
         clus_view[i].nFakeDigis() = 0;
         clus_view[i].rawId() = 0;
+        clus_view[i].nDuplicatePixels() = 0;
       }
 
       for (auto i : cms::alpakatools::uniform_elements(acc, numElements)) {
@@ -112,6 +113,7 @@ namespace calibPixel {
         clus_view[i].clusInModule() = 0;
         clus_view[i].nFakeDigis() = 0;
         clus_view[i].rawId() = 0;
+        clus_view[i].nDuplicatePixels() = 0;
       }
 
       for (uint32_t i : cms::alpakatools::uniform_elements(acc, numElements)) {
