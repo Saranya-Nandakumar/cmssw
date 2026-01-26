@@ -56,14 +56,8 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
                                            "Number of Modules with Fake Digis;Modules;Events",
                                            100,
                                            0.,
-                                           100.);
+                                           2000.);
 
-  // Cluster-level histograms
-  meFakeDigisPerCluster_ = iBooker.book1D("FakeDigisPerCluster",
-                                         "Fake Digis per Cluster;Fake Digis;Clusters",
-                                         50,
-                                         0.,
-                                         50.);
 
   // Barrel Summary
   meNFakeDigisBarrel_ = iBooker.book1D("NFakeDigisBarrel",
