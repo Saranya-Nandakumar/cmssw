@@ -16,9 +16,8 @@
 #include "HeterogeneousCore/AlpakaInterface/interface/SimpleVector.h"
 #include "HeterogeneousCore/AlpakaInterface/interface/config.h"
 #include "HeterogeneousCore/AlpakaInterface/interface/warpsize.h"
-#include "HeterogeneousCore/AlpakaInterface/interface/debug.h"
 
-//#define GPU_DEBUG
+#define GPU_DEBUG
 
 // TODO move to HeterogeneousCore/AlpakaInterface or upstream to alpaka
 template <typename TAcc, typename T>
@@ -61,11 +60,20 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
 
     enum Status : uint32_t { kEmpty = 0x00, kFound = 0x01, kDuplicate = 0x03, kFake = 0x02 };
 
-    // 2-bit per pixel Status packed in 32-bit words
+    // 2-bit per pixel Status packed in 32-bit words (legacy, used for expansion/erosion)
     constexpr uint32_t bits = 2;
     constexpr uint32_t mask = (0x01 << bits) - 1;
     constexpr uint32_t valuesPerWord = sizeof(uint32_t) * 8 / bits;     // 16 values per 32-bit word
     constexpr uint32_t size = pixelSizeX * pixelSizeY / valuesPerWord;  // 160 x 416 / 16 = 4160 32-bit words
+
+    // 1-bit per pixel packed in 32-bit words (new scheme with 2 buffers: image + temp)
+    // image: 0=empty, 1=found, 0=fake, 1=duplicate
+    // temp:  0=empty, 0=found, 1=fake, 1=duplicate
+    constexpr uint32_t bits_new = 1;
+    constexpr uint32_t mask_new = 1;
+    constexpr uint32_t valuesPerWord_new = sizeof(uint32_t) * 8 / bits_new;     // 32 values per 32-bit word
+    constexpr uint32_t size_new = pixelSizeX * pixelSizeY / valuesPerWord_new;  // 160 x 416 / 32 = 2080 32-bit words
+    constexpr uint32_t rowSize_new = pixelSizeX / valuesPerWord_new;            // 160 / 32 = 5 words per row
 
     ALPAKA_FN_ACC ALPAKA_FN_INLINE constexpr uint32_t getIndex(uint16_t x, uint16_t y) {
       return (pixelSizeX * y + x) / valuesPerWord;
@@ -73,6 +81,15 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
 
     ALPAKA_FN_ACC ALPAKA_FN_INLINE constexpr uint32_t getShift(uint16_t x, uint16_t y) {
       return (x % valuesPerWord) * bits;
+    }
+
+    // 1-bit versions for new 2-buffer scheme
+    ALPAKA_FN_ACC ALPAKA_FN_INLINE constexpr uint32_t getIndex_new(uint16_t x, uint16_t y) {
+      return (pixelSizeX * y + x) / valuesPerWord_new;
+    }
+
+    ALPAKA_FN_ACC ALPAKA_FN_INLINE constexpr uint32_t getShift_new(uint16_t x, uint16_t y) {
+      return (x % valuesPerWord_new) * bits_new;
     }
 
     // Return the current status of a pixel based on its coordinates.
@@ -113,6 +130,42 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         old_word = alpaka::atomicCas(acc, &status[index], expected, new_word, alpaka::hierarchy::Threads{});
       } while (expected != old_word);
       return new_status;
+    }
+
+    // Record a pixel using the new 2-buffer scheme (image + temp, 1-bit each).
+    // Returns: kFound if pixel was empty, kDuplicate if pixel was already found.
+    ALPAKA_FN_ACC ALPAKA_FN_INLINE Status promote_new(Acc1D const& acc,
+                                                      uint32_t* image,
+                                                      uint32_t* temp,
+                                                      const uint16_t x,
+                                                      const uint16_t y) {
+      uint32_t index = getIndex_new(x, y);
+      uint32_t shift = getShift_new(x, y);
+      uint32_t bit = mask_new << shift;
+
+      // Try to set the image bit (marks pixel as found)
+      uint32_t old_image = alpaka::atomicOr(acc, &image[index], bit, alpaka::hierarchy::Threads{});
+
+      if ((old_image & bit) == 0) {
+        // Image bit was 0, now set to 1 -> pixel was empty, now found
+        return kFound;
+      } else {
+        // Image bit was already 1 -> pixel was already found, mark as duplicate
+        // Set the temp bit to mark as duplicate
+        alpaka::atomicOr(acc, &temp[index], bit, alpaka::hierarchy::Threads{});
+        return kDuplicate;
+      }
+    }
+
+    // Check if a pixel is duplicate using the new 2-buffer scheme.
+    // Duplicate = image bit set AND temp bit set.
+    ALPAKA_FN_ACC ALPAKA_FN_INLINE bool isDuplicate_new(uint32_t const* __restrict__ image,
+                                                        uint32_t const* __restrict__ temp,
+                                                        uint16_t x,
+                                                        uint16_t y) {
+      uint32_t index = getIndex_new(x, y);
+      uint32_t shift = getShift_new(x, y);
+      return ((image[index] >> shift) & mask_new) && ((temp[index] >> shift) & mask_new);
     }
 
     ALPAKA_FN_ACC
@@ -197,6 +250,7 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
 
       auto& lastPixel = alpaka::declareSharedVar<unsigned int, __COUNTER__>(acc);
       auto& fakePixels = alpaka::declareSharedVar<unsigned int, __COUNTER__>(acc);
+      auto& duplicatePixels = alpaka::declareSharedVar<unsigned int, __COUNTER__>(acc);
 #ifdef GPU_DEBUG
       auto& goodPixels = alpaka::declareSharedVar<uint32_t, __COUNTER__>(acc);
 #endif
@@ -208,7 +262,7 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         auto firstPixel = clus_view[1 + module].moduleStart();
         uint32_t thisModuleId = digi_view[firstPixel].moduleId();
         uint32_t rawModuleId = digi_view[firstPixel].rawIdArr();
-        bool applyDigiMorphing =
+        bool applyDigiMorphing = 
             enableDigiMorphing && pixelStatus::isMorphingModule(rawModuleId, morphingModules, nMorphingModules);
         ALPAKA_ASSERT_ACC(thisModuleId < TrackerTraits::numberOfModules);
 
@@ -224,6 +278,7 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         lastPixel = numElements;
         const uint32_t firstFake = maxFakesInModule * block;
         fakePixels = 0;
+        duplicatePixels = 0;
 #ifdef GPU_DEBUG
         goodPixels = 0;
 #endif
@@ -296,12 +351,16 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         // remove duplicate pixels
         constexpr bool isPhase2 = std::is_base_of<pixelTopology::Phase2, TrackerTraits>::value;
         if constexpr (not isPhase2) {
-          // packed words array used to store the pixelStatus of each pixel
-          auto& image = alpaka::declareSharedVar<uint32_t[pixelStatus::size], __COUNTER__>(acc);
+          // New 2-buffer scheme: 1-bit per pixel (32 pixels per 32-bit word)
+          // image: 0=empty, 1=found/duplicate
+          // temp:  0=empty/found, 1=fake/duplicate
+          auto& image = alpaka::declareSharedVar<uint32_t[pixelStatus::size_new], __COUNTER__>(acc);
+          auto& temp = alpaka::declareSharedVar<uint32_t[pixelStatus::size_new], __COUNTER__>(acc);
 
           if (lastPixel > 1) {
-            for (uint32_t i : cms::alpakatools::independent_group_elements(acc, pixelStatus::size)) {
+            for (uint32_t i : cms::alpakatools::independent_group_elements(acc, pixelStatus::size_new)) {
               image[i] = 0;
+              temp[i] = 0;
             }
             alpaka::syncBlockThreads(acc);
 
@@ -309,7 +368,7 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
               // skip invalid pixels
               if (digi_view[i].moduleId() == ::pixelClustering::invalidModuleId)
                 continue;
-              pixelStatus::promote(acc, image, digi_view[i].xx(), digi_view[i].yy());
+              pixelStatus::promote_new(acc, image, temp, digi_view[i].xx(), digi_view[i].yy());
             }
             alpaka::syncBlockThreads(acc);
 
@@ -317,14 +376,16 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
               // skip invalid pixels
               if (digi_view[i].moduleId() == ::pixelClustering::invalidModuleId)
                 continue;
-              auto status = pixelStatus::getStatus(image, digi_view[i].xx(), digi_view[i].yy());
-              if (pixelStatus::kDuplicate == status) {
+              // Duplicate = image bit AND temp bit both set
+              if (pixelStatus::isDuplicate_new(image, temp, digi_view[i].xx(), digi_view[i].yy())) {
                 // Mark all duplicate pixels as invalid.
                 // Note: the alternative approach to keep a single one of the duplicates would probably make more sense.
                 // According to Danek (16 March 2022): "The best would be to ignore such hits, most likely they are just
                 // noise. Accepting just one is also OK, any of them."
                 digi_view[i].moduleId() = ::pixelClustering::invalidModuleId;
                 digi_view[i].rawIdArr() = 0;
+                // Count duplicate pixels for monitoring
+                alpaka::atomicAdd(acc, &duplicatePixels, 1u, alpaka::hierarchy::Threads{});
               }
             }
             alpaka::syncBlockThreads(acc);
@@ -332,93 +393,101 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
             // apply the digi morphing recovery algorithm
             if (applyDigiMorphing) {
               using namespace pixelStatus;
-              constexpr uint32_t rowSize = pixelSizeX / valuesPerWord;  // 160 / 16 = 10 words per row
+              constexpr uint32_t rowSize = pixelSizeX / valuesPerWord_new;  // 160 / 32 = 5 words per row
 
               // Mark all duplicate pixels as empty in the image, to let the morphing attempt to recover them.
-              for (uint32_t i : cms::alpakatools::independent_group_elements(acc, size)) {
-                uint32_t value = image[i];
-                // Duplicate pixels are marked as kDuplicate = 0b11.
-                // Identify them from the high bit, and if they are found remove both bits.
-                uint32_t masked = value & 0b10'10'10'10'10'10'10'10'10'10'10'10'10'10'10'10;
-                masked |= (masked >> 1);
-                value &= ~masked;
-                image[i] = value;
+              // In the new 2-buffer scheme: duplicates have image=1, temp=1
+              // Clear both bits to make them empty (image=0, temp=0)
+              for (uint32_t i : cms::alpakatools::independent_group_elements(acc, size_new)) {
+                // Duplicates are where both image and temp bits are set
+                uint32_t duplicates = image[i] & temp[i];
+                image[i] &= ~duplicates;
+                temp[i] &= ~duplicates;
               }
               alpaka::syncBlockThreads(acc);
 
-              // use the status buffer as a 2-bit-per-pixel image, with 16 pixels packed in each 32-bit word
-              // ......  ...............................................  .....
-              // ....##  ##.##.##.##.##.##.##.##.##.##.##.##.##.##.##.##  ##...
-              // ....## [##.##.##.##.##.##.##.##.##.##.##.##.##.##.##.##] ##...
-              // ....##  ##.##.##.##.##.##.##.##.##.##.##.##.##.##.##.##  ##...
-              // ......  ...............................................  .....
+              // use the image buffer as a 1-bit-per-pixel image, with 32 pixels packed in each 32-bit word
+              // ......  .................................................................  .....
+              // .....#  #.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#  #....
+              // .....# [#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#] #....
+              // .....#  #.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#.#  #....
+              // ......  .................................................................  .....
 
-              // first step: expand and mark expanded pixels as kFake
-              // size = pixelSizeX * pixelSizeY / valuesPerWord;  // 160 x 416 / 16 = 4160 32-bit words
-              for (uint32_t i : cms::alpakatools::independent_group_elements(acc, size)) {
-                uint16_t x = i % rowSize * valuesPerWord;  // 0..9 x 16    = 0, 16, 32, ..., 144
-                uint16_t y = i / rowSize;                  // 0..4159 / 10 = 0..415
-                uint32_t value = image[i];
-                uint64_t buffer = static_cast<uint64_t>(value) << 2;
+              // first step: expand - read from image, write to temp (where image is 0)
+              // Mark empty pixels (image=0) as fake (temp=1) if any neighbor has image=1
+              for (uint32_t i : cms::alpakatools::independent_group_elements(acc, size_new)) {
+                uint16_t x = i % rowSize_new * valuesPerWord_new;  // 0..4 x 32 = 0, 32, 64, 96, 128
+                uint16_t y = i / rowSize_new;                       // 0..2079 / 5 = 0..415
+                uint32_t img = image[i];
+
+                // Build 64-bit buffer: OR together current, above, below rows
+                // Shifted by 1 to make room for left edge pixel at bit 0
+                uint64_t buffer = static_cast<uint64_t>(img) << 1;
                 if (y > 0) {
-                  // merge the word above
-                  buffer |= static_cast<uint64_t>(image[i - rowSize]) << 2;
+                  buffer |= static_cast<uint64_t>(image[i - rowSize_new]) << 1;
                 }
                 if (y < pixelSizeY - 1) {
-                  // merge the word below
-                  buffer |= static_cast<uint64_t>(image[i + rowSize]) << 2;
+                  buffer |= static_cast<uint64_t>(image[i + rowSize_new]) << 1;
                 }
+
+                // Add left edge pixel (bit 31 from previous word -> bit 0 of buffer)
                 if (x > 0) {
-                  // extract the pixels from the previous column, and merge them in the buffer
-                  buffer |= static_cast<uint64_t>(image[i - 1]) >> 30 & mask;
+                  buffer |= static_cast<uint64_t>(image[i - 1] >> 31) & mask_new;
                   if (y > 0)
-                    buffer |= static_cast<uint64_t>(image[i - rowSize - 1]) >> 30 & mask;
+                    buffer |= static_cast<uint64_t>(image[i - rowSize_new - 1] >> 31) & mask_new;
                   if (y < pixelSizeY - 1)
-                    buffer |= static_cast<uint64_t>(image[i + rowSize - 1]) >> 30 & mask;
+                    buffer |= static_cast<uint64_t>(image[i + rowSize_new - 1] >> 31) & mask_new;
                 }
-                if (x < pixelSizeX - valuesPerWord) {
-                  // extract the pixels from the following column, and merge them in the buffer
-                  buffer |= static_cast<uint64_t>(image[i + 1] & mask) << 34;
+
+                // Add right edge pixel (bit 0 from next word -> bit 33 of buffer)
+                if (x < pixelSizeX - valuesPerWord_new) {
+                  buffer |= static_cast<uint64_t>(image[i + 1] & mask_new) << 33;
                   if (y > 0)
-                    buffer |= static_cast<uint64_t>(image[i - rowSize + 1] & mask) << 34;
+                    buffer |= static_cast<uint64_t>(image[i - rowSize_new + 1] & mask_new) << 33;
                   if (y < pixelSizeY - 1)
-                    buffer |= static_cast<uint64_t>(image[i + rowSize + 1] & mask) << 34;
+                    buffer |= static_cast<uint64_t>(image[i + rowSize_new + 1] & mask_new) << 33;
                 }
-                // mark kEmpty pixels as kFake if any neighbour is non-empty (kFound or kDuplicate)
-                for (uint32_t j = 0; j < valuesPerWord; ++j) {
-                  uint32_t shift = j * 2;
-                  // skip non-empty pixels
-                  if (Status{(value >> shift) & mask} != kEmpty) {
+
+                // For each pixel where image=0, check if any neighbor (in merged buffer) is set
+                uint32_t fake = 0;
+                for (uint32_t j = 0; j < valuesPerWord_new; ++j) {
+                  uint32_t shift = j * bits_new;
+                  // skip pixels where image bit is set (found pixels, not empty)
+                  if ((img >> shift) & mask_new) {
                     continue;
                   }
-                  // extract the kFound or kDuplicate status of the three columns of pixels in the buffer
-                  if (((buffer >> shift) & 0b010101) != 0) {
-                    // set the status of the non-edge pixel in the word to kFake
-                    value |= kFake << shift;
+                  // check 3 consecutive bits: left neighbor (shift), current (shift+1), right neighbor (shift+2)
+                  // in the merged buffer (which has all 3 rows ORed together)
+                  if (((buffer >> shift) & 0b111) != 0) {
+                    fake |= mask_new << shift;
                   }
                 }
-                // store the result back into the buffer
-                image[i] = value;
+                // write fake pixels to temp buffer
+                temp[i] |= fake;
               }
               alpaka::syncBlockThreads(acc);
 
               // second step: erode, and create new fake pixels for the remaining ones
-              for (uint32_t i : cms::alpakatools::independent_group_elements(acc, size)) {
-                uint16_t x = i % rowSize * valuesPerWord;  // 0..9 x 16    = 0, 16, 32, ..., 144
-                uint16_t y = i / rowSize;                  // 0..4159 / 10 = 0..415
-                uint32_t value = image[i];
-                uint32_t above = (y > 0) ? (image[i - rowSize]) : 0;
-                uint32_t below = (y < pixelSizeY - 1) ? image[i + rowSize] : 0;
+              // Read from image | temp to check non-empty neighbors (image=1 OR temp=1)
+              // Process only fake pixels (image=0, temp=1)
+              for (uint32_t i : cms::alpakatools::independent_group_elements(acc, size_new)) {
+                uint16_t x = i % rowSize_new * valuesPerWord_new;  // 0..4 x 32 = 0, 32, 64, 96, 128
+                uint16_t y = i / rowSize_new;                       // 0..2079 / 5 = 0..415
+                uint32_t img = image[i];
+                uint32_t tmp = temp[i];
+                uint32_t value = img | tmp;  // non-empty = image OR temp
+                uint32_t above = (y > 0) ? (image[i - rowSize_new] | temp[i - rowSize_new]) : 0;
+                uint32_t below = (y < pixelSizeY - 1) ? (image[i + rowSize_new] | temp[i + rowSize_new]) : 0;
                 // First pixel (j = 0)
                 {
                   // shift = 0
-                  // Process only fake (recovered) pixels.
-                  if ((value & mask) == kFake) {
+                  // Process only fake (recovered) pixels: image=0, temp=1
+                  if ((img & mask_new) == 0 and (tmp & mask_new) != 0) {
                     // If there are no pixels on the edge, pretend it is a fake (recovered) one.
-                    Status edge = (x > 0) ? Status{image[i - 1] >> ((valuesPerWord - 1) * bits) & mask} : kFake;
+                    uint32_t edge = (x > 0) ? ((image[i - 1] | temp[i - 1]) >> (valuesPerWord_new - 1)) & mask_new : 1;
                     // Check that the pixels to the left, above, below, and to the right are not empty.
-                    if (edge != kEmpty and (above & mask) != kEmpty and (below & mask) != kEmpty and
-                        (value >> bits & mask) != kEmpty) {
+                    if (edge != 0 and (above & mask_new) != 0 and (below & mask_new) != 0 and
+                        ((value >> bits_new) & mask_new) != 0) {
                       // Create a fake pixel, up to maxFakesInModule pixels per module.
                       unsigned int index =
                           alpaka::atomicInc(acc, &fakePixels, 0xffffffff, alpaka::hierarchy::Threads{});
@@ -437,14 +506,14 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
                     }
                   }
                 }
-                // Non-edge pixels (j = 1..14)
-                for (uint32_t j = 1; j < valuesPerWord - 1; ++j) {
-                  uint32_t shift = j * bits;
-                  // Process only fake (recovered) pixels.
-                  if ((value >> shift & mask) == kFake) {
+                // Non-edge pixels (j = 1..30)
+                for (uint32_t j = 1; j < valuesPerWord_new - 1; ++j) {
+                  uint32_t shift = j * bits_new;
+                  // Process only fake (recovered) pixels: image=0, temp=1
+                  if (((img >> shift) & mask_new) == 0 and ((tmp >> shift) & mask_new) != 0) {
                     // Check that the pixels to the left, above, below, and to the right are not empty.
-                    if ((value >> (shift - bits) & mask) != kEmpty and (above >> shift & mask) != kEmpty and
-                        (below >> shift & mask) != kEmpty and (value >> (shift + bits) & mask) != kEmpty) {
+                    if (((value >> (shift - bits_new)) & mask_new) != 0 and ((above >> shift) & mask_new) != 0 and
+                        ((below >> shift) & mask_new) != 0 and ((value >> (shift + bits_new)) & mask_new) != 0) {
                       // Create a fake pixel, up to maxFakesInModule pixels per module.
                       unsigned int index =
                           alpaka::atomicInc(acc, &fakePixels, 0xffffffff, alpaka::hierarchy::Threads{});
@@ -463,23 +532,23 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
                     }
                   }
                 }
-                // Last pixel (j = 15)
+                // Last pixel (j = 31)
                 {
-                  uint32_t shift = ((valuesPerWord - 1) * bits);
-                  // Process only fake (recovered) pixels.
-                  if ((value >> shift & mask) == kFake) {
+                  uint32_t shift = (valuesPerWord_new - 1) * bits_new;
+                  // Process only fake (recovered) pixels: image=0, temp=1
+                  if (((img >> shift) & mask_new) == 0 and ((tmp >> shift) & mask_new) != 0) {
                     // If there are no pixels on the edge, pretend it is a fake (recovered) one.
-                    Status edge = (x < pixelSizeX - valuesPerWord) ? Status{image[i + 1] & mask} : kFake;
+                    uint32_t edge = (x < pixelSizeX - valuesPerWord_new) ? ((image[i + 1] | temp[i + 1]) & mask_new) : 1;
                     // Check that the pixels to the left, above, below, and to the right are not empty.
-                    if ((value >> (shift - bits) & mask) != kEmpty and (above >> shift & mask) != kEmpty and
-                        (below >> shift & mask) != kEmpty and edge != kEmpty) {
+                    if (((value >> (shift - bits_new)) & mask_new) != 0 and ((above >> shift) & mask_new) != 0 and
+                        ((below >> shift) & mask_new) != 0 and edge != 0) {
                       // Create a fake pixel, up to maxFakesInModule pixels per module.
                       unsigned int index =
                           alpaka::atomicInc(acc, &fakePixels, 0xffffffff, alpaka::hierarchy::Threads{});
                       if (index < maxFakesInModule) {
                         auto fake = fakes_view[firstFake + index];
                         ALPAKA_ASSERT_ACC(fake.clus() == static_cast<int32_t>(numElements + firstFake + index));
-                        fake.xx() = x + valuesPerWord - 1;
+                        fake.xx() = x + valuesPerWord_new - 1;
                         fake.yy() = y;
                         fake.moduleId() = thisModuleId;
                       } else {
@@ -531,7 +600,7 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         if (thisModuleId % 100 == 1) {
           if (cms::alpakatools::once_per_block(acc)) {
             printf(
-                "module %d has %d good pixels and recovered %d pixels by morphing\n", module, goodPixels, fakePixels);
+                "module %d has %d good pixels and recovered %d pixels by morphing\n", rawModuleId, goodPixels, fakePixels);
             printf("histo size %d\n", hist.size());
           }
         }
@@ -580,7 +649,6 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
 
         [[maybe_unused]] const uint32_t blockDimension = alpaka::getWorkDiv<alpaka::Block, alpaka::Elems>(acc)[0u];
         // assume that we can cover the whole module with up to maxIterClustering blockDimension-wide iterations
-        ALPAKA_ACCELERATOR_NAMESPACE::debug::do_not_optimise(hist.size());
         ALPAKA_ASSERT_ACC((hist.size() / blockDimension) < TrackerTraits::maxIterClustering);
 
         // number of elements per thread
@@ -808,6 +876,9 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
         if (cms::alpakatools::once_per_block(acc)) {
           clus_view[thisModuleId].clusInModule() = foundClusters;
           clus_view[module].moduleId() = thisModuleId;
+          clus_view[thisModuleId].nFakeDigis() = fakePixels;              // Store fake digi count for monitoring
+          clus_view[thisModuleId].nDuplicatePixels() = duplicatePixels;   // Store duplicate pixel count for monitoring
+          clus_view[thisModuleId].rawId() = rawModuleId;                  // Store DetId for monitoring
 #ifdef GPU_DEBUG
           if (foundClusters > gMaxHit) {
             gMaxHit = foundClusters;
@@ -825,3 +896,4 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering {
 }  // namespace ALPAKA_ACCELERATOR_NAMESPACE::pixelClustering
 
 #endif  // plugin_SiPixelClusterizer_alpaka_PixelClustering.h
+
