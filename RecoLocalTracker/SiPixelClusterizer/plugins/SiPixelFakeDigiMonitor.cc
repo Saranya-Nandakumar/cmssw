@@ -112,11 +112,6 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
                                                   0.,
                                                   1.0);
   
-  meFakeDigisRate_ = iBooker.book1D("FakeDigisRate",
-                                    "Fake Digis Rate (avg per LS);Lumisection;Rate [fake digis/event]",
-                                    2000,
-                                    0.,
-                                    2000.);
 
   // ============ Duplicate Pixels Histograms ============
   iBooker.setCurrentFolder(topFolderName_ + "/DuplicatePixels");
