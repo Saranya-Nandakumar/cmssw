@@ -78,7 +78,7 @@ private:
   MonitorElement* meFakeDigisPerDetIdDisk_[3];   // Profile per disk: DetId vs fake digis
   
   MonitorElement* meFakeDigiDistribution_;
-  MonitorElement* meFakeDigiOccupancyBarrel_;
+  MonitorElement* meFakeDigiOccupancyBarrelLayer_[4];  // Per-layer: Module vs Ladder
   MonitorElement* meFakeDigiOccupancyEndcap_;
   MonitorElement* meFakeDigisPerDetId_;  // Profile: avg fake digis per module DetId
   
@@ -100,7 +100,7 @@ private:
   MonitorElement* meNDuplicatePixelsDisk_[3];   // Forward disks (both +/-)
 
   // Duplicate Pixels - Occupancy
-  MonitorElement* meDuplicatePixelOccupancyBarrel_;
+  MonitorElement* meDuplicatePixelOccupancyBarrelLayer_[4];  // Per-layer: Module vs Ladder
 
   // Duplicate Pixels - HLT monitoring
   MonitorElement* meDuplicatePixelsPerEventVsLS_;
