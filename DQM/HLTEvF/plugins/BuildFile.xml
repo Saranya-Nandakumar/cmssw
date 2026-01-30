@@ -12,11 +12,17 @@
   <use name="DataFormats/L1TGlobal"/>
   <use name="DataFormats/OnlineMetaData"/>
   <use name="DataFormats/RecoCandidate"/>
+  <use name="DataFormats/SiPixelCluster"/>
+  <use name="DataFormats/SiPixelClusterSoA"/>
+  <use name="DataFormats/SiPixelDigi"/>
+  <use name="DataFormats/SiPixelDigiSoA"/>
+  <use name="DataFormats/TrackerCommon"/>
   <use name="FWCore/Framework"/>
   <use name="FWCore/MessageLogger"/>
   <use name="FWCore/ParameterSet"/>
   <use name="FWCore/ServiceRegistry"/>
   <use name="Geometry/Records"/>
+  <use name="Geometry/TrackerGeometryBuilder"/>
   <use name="DQMOffline/Trigger"/>
   <use name="rootcore"/>
   <flags EDM_PLUGIN="1"/>
