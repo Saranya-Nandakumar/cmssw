@@ -24,6 +24,7 @@
 
 #include "Geometry/Records/interface/TrackerTopologyRcd.h"
 #include "Geometry/TrackerGeometryBuilder/interface/TrackerGeometry.h"
+#include "Geometry/TrackerGeometryBuilder/interface/PixelTopologyMap.h"
 #include "Geometry/Records/interface/TrackerDigiGeometryRecord.h"
 
 #include <map>
@@ -91,7 +92,7 @@ private:
   unsigned int nBarrelLayers_;
   unsigned int nEndcapDisks_;
   std::vector<unsigned int> nLaddersPerLayer_;
-  static constexpr int nModulesPerLadder_ = 8;
+  std::vector<unsigned int> nModulesPerLayer_;
 
   // Lumisection counters
   std::atomic<unsigned long long> fakeDigisThisLS_;
@@ -133,32 +134,17 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
   const TrackerTopology& tTopo = iSetup.getData(trackerTopoTokenBeginRun_);
   const TrackerGeometry& trackerGeom = iSetup.getData(trackerGeomTokenBeginRun_);
 
-  // Determine geometry from TrackerGeometry
-  nBarrelLayers_ = 0;
-  nEndcapDisks_ = 0;
-  std::map<unsigned int, std::set<unsigned int>> laddersPerLayer;
+  // Use PixelTopologyMap to get geometry information
+  PixelTopologyMap pixelTopoMap(&trackerGeom, &tTopo);
 
-  for (const auto& det : trackerGeom.detUnits()) {
-    DetId detId = det->geographicalId();
-    if (detId.det() != DetId::Tracker)
-      continue;
-
-    if (detId.subdetId() == PixelSubdetector::PixelBarrel) {
-      unsigned int layer = tTopo.pxbLayer(detId);
-      unsigned int ladder = tTopo.pxbLadder(detId);
-      if (layer > nBarrelLayers_)
-        nBarrelLayers_ = layer;
-      laddersPerLayer[layer].insert(ladder);
-    } else if (detId.subdetId() == PixelSubdetector::PixelEndcap) {
-      unsigned int disk = tTopo.pxfDisk(detId);
-      if (disk > nEndcapDisks_)
-        nEndcapDisks_ = disk;
-    }
-  }
+  nBarrelLayers_ = trackerGeom.numberOfLayers(PixelSubdetector::PixelBarrel);
+  nEndcapDisks_ = trackerGeom.numberOfLayers(PixelSubdetector::PixelEndcap);
 
   nLaddersPerLayer_.resize(nBarrelLayers_, 0);
+  nModulesPerLayer_.resize(nBarrelLayers_, 0);
   for (unsigned int layer = 1; layer <= nBarrelLayers_; ++layer) {
-    nLaddersPerLayer_[layer - 1] = laddersPerLayer[layer].size();
+    nLaddersPerLayer_[layer - 1] = pixelTopoMap.getPXBLadders(layer);
+    nModulesPerLayer_[layer - 1] = pixelTopoMap.getPXBModules(layer);
   }
 
   // Resize histogram vectors
@@ -204,13 +190,14 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
   for (unsigned int i = 0; i < nBarrelLayers_; i++) {
     int nLadders = nLaddersPerLayer_[i];
     int halfLadders = nLadders / 2;
+    int nModules = nModulesPerLayer_[i];
     std::string hname = "FakeDigiOccupancyBarrelLayer" + std::to_string(i + 1);
     std::string htitle = "Fake Digi Occupancy (Barrel Layer " + std::to_string(i + 1) + ");Module;Ladder";
     meFakeDigiOccupancyBarrelLayer_[i] = iBooker.book2D(
-        hname, htitle, nModulesPerLadder_ + 1, -4.5, 4.5, nLadders + 1, -(halfLadders + 0.5), halfLadders + 0.5);
+        hname, htitle, nModules + 1, -4.5, 4.5, nLadders + 1, -(halfLadders + 0.5), halfLadders + 0.5);
     meFakeDigiOccupancyBarrelLayer_[i]->setOption("colz");
     meFakeDigiOccupancyBarrelLayer_[i]->getTH2F()->SetMinimum(0.001);
-    for (int j = 1; j <= nModulesPerLadder_ + 1; j++) {
+    for (int j = 1; j <= nModules + 1; j++) {
       meFakeDigiOccupancyBarrelLayer_[i]->setBinLabel(j, std::to_string(j - 5), 1);
     }
   }
@@ -257,13 +244,14 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
   for (unsigned int i = 0; i < nBarrelLayers_; i++) {
     int nLadders = nLaddersPerLayer_[i];
     int halfLadders = nLadders / 2;
+    int nModules = nModulesPerLayer_[i];
     std::string hname = "DuplicatePixelOccupancyBarrelLayer" + std::to_string(i + 1);
     std::string htitle = "Duplicate Pixel Occupancy (Barrel Layer " + std::to_string(i + 1) + ");Module;Ladder";
     meDuplicatePixelOccupancyBarrelLayer_[i] = iBooker.book2D(
-        hname, htitle, nModulesPerLadder_ + 1, -4.5, 4.5, nLadders + 1, -(halfLadders + 0.5), halfLadders + 0.5);
+        hname, htitle, nModules + 1, -4.5, 4.5, nLadders + 1, -(halfLadders + 0.5), halfLadders + 0.5);
     meDuplicatePixelOccupancyBarrelLayer_[i]->setOption("colz");
     meDuplicatePixelOccupancyBarrelLayer_[i]->getTH2F()->SetMinimum(0.001);
-    for (int j = 1; j <= nModulesPerLadder_ + 1; j++) {
+    for (int j = 1; j <= nModules + 1; j++) {
       meDuplicatePixelOccupancyBarrelLayer_[i]->setBinLabel(j, std::to_string(j - 5), 1);
     }
   }
