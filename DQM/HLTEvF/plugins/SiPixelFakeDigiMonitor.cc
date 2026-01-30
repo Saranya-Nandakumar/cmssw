@@ -1,12 +1,3 @@
-// -*- C++ -*-
-//
-// Package:    DQM/HLTEvF
-// Class:      SiPixelFakeDigiMonitor
-//
-// DQM Monitoring for fake/recovered digis and duplicate pixels from pixel clustering.
-// Monitors pixels that are filled in during digi morphing to maintain cluster contiguity.
-//
-
 #include "FWCore/Framework/interface/Frameworkfwd.h"
 #include "FWCore/Framework/interface/Event.h"
 #include "FWCore/Framework/interface/MakerMacros.h"
