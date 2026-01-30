@@ -28,43 +28,34 @@ SiPixelFakeDigiMonitor::~SiPixelFakeDigiMonitor() {}
 void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
                                             edm::Run const& iRun,
                                             edm::EventSetup const& iSetup) {
-  iBooker.setCurrentFolder(topFolderName_ + "/FakeDigis");
+  
+  // Constants for per-layer occupancy binning
+  const int nModulesPerLadder = 8;  // Modules along z per ladder
+  const int nLaddersPerLayer[4] = {12, 28, 44, 64};  // Ladders per layer
 
-  // Remove maxFakesCount and set y-axis maximums to a very large value to avoid capping
+  iBooker.setCurrentFolder(topFolderName_ + "/FakeDigis");
 
   // Event-level histograms
   meFakeDigisPerEvent_ = iBooker.book1D("FakeDigisPerEvent",
-                                      "Number of Fake Digis per Event;Fake Digis;Events",
-                                      500,
-                                      0.,
-                                      8000.);
+                                        "Number of Fake Digis per Event;Fake Digis;Events",
+                                        500, 0., 8000.);
 
   // Module-level histograms
-    meFakeDigisPerModule_ = iBooker.book1D("FakeDigisPerModule",
-                                          "Number of Fake Digis per Module;Fake Digis;Modules (RawID)",
-                                          2000,
-                                          0.,
-                                          8000.);
+  meFakeDigisPerModule_ = iBooker.book1D("FakeDigisPerModule",
+                                         "Number of Fake Digis per Module;Fake Digis;Modules (RawID)",
+                                         2000, 0., 8000.);
 
   meFakeDigisPerModuleBarrel_ = iBooker.book1D("FakeDigisPerModuleBarrel",
                                                "Fake Digis per Module (Barrel);Fake Digis;Modules",
-                                               100,
-                                               0.,
-                                               8000.);
+                                               100, 0., 8000.);
 
   meModulesWithFakeDigis_ = iBooker.book1D("ModulesWithFakeDigis",
                                            "Number of Modules with Fake Digis;Modules;Events",
-                                           100,
-                                           0.,
-                                           2000.);
+                                           100, 0., 2000.);
 
-
-  // Barrel Summary
   meNFakeDigisBarrel_ = iBooker.book1D("NFakeDigisBarrel",
                                        "Number of Fake Digis (Barrel);Fake Digis;Events",
-                                       500,
-                                       0.,
-                                       8000.);
+                                       500, 0., 8000.);
 
   // Per-layer histograms
   iBooker.setCurrentFolder(topFolderName_ + "/FakeDigis/Barrel");
@@ -82,160 +73,90 @@ void SiPixelFakeDigiMonitor::bookHistograms(DQMStore::IBooker& iBooker,
     meNFakeDigisDisk_[i] = iBooker.book1D(hname, htitle, 200, 0., 8000.);
   }
 
-  // Occupancy maps
+  // Per-layer occupancy maps: Module (x) vs Ladder (y)
   iBooker.setCurrentFolder(topFolderName_ + "/FakeDigis/Occupancy");
-  meFakeDigiOccupancyBarrel_ = iBooker.book2D("FakeDigiOccupancyBarrel",
-                                              "Fake Digi Occupancy (Barrel);z [cm];phi",
-                                              100,
-                                              -30.,
-                                              30.,
-                                              100,
-                                              -3.15,
-                                              3.15);
+  for (int i = 0; i < 4; i++) {
+    int nLadders = nLaddersPerLayer[i];
+    int halfLadders = nLadders / 2;
+    std::string hname = "FakeDigiOccupancyBarrelLayer" + std::to_string(i + 1);
+    std::string htitle = "Fake Digi Occupancy (Barrel Layer " + std::to_string(i + 1) +
+                         ");Module;Ladder";
+    meFakeDigiOccupancyBarrelLayer_[i] = iBooker.book2D(hname, htitle,
+                                                        nModulesPerLadder + 1, -4.5, 4.5,
+                                                        nLadders + 1, -(halfLadders + 0.5), halfLadders + 0.5);
+    // Set COLZ draw option, keep 0-bins white, and add bin labels for clear module borders
+    meFakeDigiOccupancyBarrelLayer_[i]->setOption("colz");
+    meFakeDigiOccupancyBarrelLayer_[i]->getTH2F()->SetMinimum(0.001);
+    for (int j = 1; j <= nModulesPerLadder + 1; j++) {
+      meFakeDigiOccupancyBarrelLayer_[i]->setBinLabel(j, std::to_string(j - 5), 1);
+    }
+  }
 
-  // HLT monitoring - trends vs lumisection
+  // HLT monitoring
   iBooker.setCurrentFolder(topFolderName_ + "/FakeDigis/HLT");
-  
-  meFakeDigisPerEventVsLS_ = iBooker.bookProfile("FakeDigisPerEventVsLS",
-                                                  "Fake Digis per Event vs LS;Lumisection;Fake Digis/Event",
-                                                  2000,
-                                                  0.,
-                                                  2000.,
-                                                  0.,
-                                                  8000.);
-  
-  meFakeDigisFractionVsLS_ = iBooker.bookProfile("FakeDigisFractionVsLS",
-                                                  "Fake Digis Fraction vs LS;Lumisection;Fake Fraction",
-                                                  2000,
-                                                  0.,
-                                                  2000.,
-                                                  0.,
-                                                  1.0);
-  
-  meFakeDigisRate_ = iBooker.book1D("FakeDigisRate",
-                                    "Fake Digis Rate (avg per LS);Lumisection;Rate [fake digis/event]",
-                                    2000,
-                                    0.,
-                                    2000.);
+  meFakeDigisPerEventVsLS_ = iBooker.bookProfile("FakeDigisPerEventVsLS", "Fake Digis per Event vs LS;Lumisection;Fake Digis/Event", 2000, 0., 2000., 0., 8000.);
+  meFakeDigisFractionVsLS_ = iBooker.bookProfile("FakeDigisFractionVsLS", "Fake Digis Fraction vs LS;Lumisection;Fake Fraction", 2000, 0., 2000., 0., 1.0);
 
   // ============ Duplicate Pixels Histograms ============
   iBooker.setCurrentFolder(topFolderName_ + "/DuplicatePixels");
+  meDuplicatePixelsPerEvent_ = iBooker.book1D("DuplicatePixelsPerEvent", "Number of Duplicate Pixels per Event;Duplicate Pixels;Events", 500, 0., 500.);
+  meDuplicatePixelsPerModule_ = iBooker.book1D("DuplicatePixelsPerModule", "Number of Duplicate Pixels per Module;Duplicate Pixels;Modules", 200, 0., 500.);
+  meDuplicatePixelsPerModuleBarrel_ = iBooker.book1D("DuplicatePixelsPerModuleBarrel", "Duplicate Pixels per Module (Barrel);Duplicate Pixels;Modules", 200, 0., 500.);
+  meDuplicatePixelsPerModuleEndcap_ = iBooker.book1D("DuplicatePixelsPerModuleEndcap", "Duplicate Pixels per Module (Endcap);Duplicate Pixels;Modules", 200, 0., 500.);
+  meModulesWithDuplicatePixels_ = iBooker.book1D("ModulesWithDuplicatePixels", "Number of Modules with Duplicate Pixels;Modules;Events", 100, 0., 100.);
+  meNDuplicatePixelsBarrel_ = iBooker.book1D("NDuplicatePixelsBarrel", "Number of Duplicate Pixels (Barrel);Duplicate Pixels;Events", 500, 0., 500.);
+  meNDuplicatePixelsEndcap_ = iBooker.book1D("NDuplicatePixelsEndcap", "Number of Duplicate Pixels (Endcap);Duplicate Pixels;Events", 500, 0., 500.);
 
-  // Event-level histograms
-  meDuplicatePixelsPerEvent_ = iBooker.book1D("DuplicatePixelsPerEvent",
-                                               "Number of Duplicate Pixels per Event;Duplicate Pixels;Events",
-                                               500,
-                                               0.,
-                                               500.);
-
-  // Module-level histograms
-  meDuplicatePixelsPerModule_ = iBooker.book1D("DuplicatePixelsPerModule",
-                                                "Number of Duplicate Pixels per Module;Duplicate Pixels;Modules",
-                                                200,
-                                                0.,
-                                                500.);
-
-  meDuplicatePixelsPerModuleBarrel_ = iBooker.book1D("DuplicatePixelsPerModuleBarrel",
-                                                      "Duplicate Pixels per Module (Barrel);Duplicate Pixels;Modules",
-                                                      200,
-                                                      0.,
-                                                      500.);
-
-  meDuplicatePixelsPerModuleEndcap_ = iBooker.book1D("DuplicatePixelsPerModuleEndcap",
-                                                      "Duplicate Pixels per Module (Endcap);Duplicate Pixels;Modules",
-                                                      200,
-                                                      0.,
-                                                      500.);
-
-  meModulesWithDuplicatePixels_ = iBooker.book1D("ModulesWithDuplicatePixels",
-                                                  "Number of Modules with Duplicate Pixels;Modules;Events",
-                                                  100,
-                                                  0.,
-                                                  100.);
-
-  // Barrel Summary
-  meNDuplicatePixelsBarrel_ = iBooker.book1D("NDuplicatePixelsBarrel",
-                                              "Number of Duplicate Pixels (Barrel);Duplicate Pixels;Events",
-                                              500,
-                                              0.,
-                                              500.);
-
-  // Endcap Summary
-  meNDuplicatePixelsEndcap_ = iBooker.book1D("NDuplicatePixelsEndcap",
-                                              "Number of Duplicate Pixels (Endcap);Duplicate Pixels;Events",
-                                              500,
-                                              0.,
-                                              500.);
-
-  // Per-layer histograms
   iBooker.setCurrentFolder(topFolderName_ + "/DuplicatePixels/Barrel");
   for (int i = 0; i < 4; i++) {
-    std::string hname = "NDuplicatePixelsLayer" + std::to_string(i + 1);
-    std::string htitle = "Number of Duplicate Pixels (Layer " + std::to_string(i + 1) + ");Duplicate Pixels;Events";
-    meNDuplicatePixelsLayer_[i] = iBooker.book1D(hname, htitle, 200, 0., 500.);
+    meNDuplicatePixelsLayer_[i] = iBooker.book1D("NDuplicatePixelsLayer" + std::to_string(i + 1), "Number of Duplicate Pixels (Layer " + std::to_string(i + 1) + ");Duplicate Pixels;Events", 200, 0., 500.);
   }
 
-  // Per-disk histograms
   iBooker.setCurrentFolder(topFolderName_ + "/DuplicatePixels/Endcap");
   for (int i = 0; i < 3; i++) {
-    std::string hname = "NDuplicatePixelsDisk" + std::to_string(i + 1);
-    std::string htitle = "Number of Duplicate Pixels (Disk " + std::to_string(i + 1) + " +/-);Duplicate Pixels;Events";
-    meNDuplicatePixelsDisk_[i] = iBooker.book1D(hname, htitle, 200, 0., 500.);
+    meNDuplicatePixelsDisk_[i] = iBooker.book1D("NDuplicatePixelsDisk" + std::to_string(i + 1), "Number of Duplicate Pixels (Disk " + std::to_string(i + 1) + " +/-);Duplicate Pixels;Events", 200, 0., 500.);
   }
 
-  // Occupancy maps
+  // Per-layer occupancy maps: Module (x) vs Ladder (y)
   iBooker.setCurrentFolder(topFolderName_ + "/DuplicatePixels/Occupancy");
-  meDuplicatePixelOccupancyBarrel_ = iBooker.book2D("DuplicatePixelOccupancyBarrel",
-                                                     "Duplicate Pixel Occupancy (Barrel);z [cm];phi",
-                                                     100,
-                                                     -30.,
-                                                     30.,
-                                                     100,
-                                                     -3.15,
-                                                     3.15);
+  for (int i = 0; i < 4; i++) {
+    int nLadders = nLaddersPerLayer[i];
+    int halfLadders = nLadders / 2;
+    std::string hname = "DuplicatePixelOccupancyBarrelLayer" + std::to_string(i + 1);
+    std::string htitle = "Duplicate Pixel Occupancy (Barrel Layer " + std::to_string(i + 1) +
+                         ");Module;Ladder";
+    meDuplicatePixelOccupancyBarrelLayer_[i] = iBooker.book2D(hname, htitle,
+                                                              nModulesPerLadder + 1, -4.5, 4.5,
+                                                              nLadders + 1, -(halfLadders + 0.5), halfLadders + 0.5);
+    // Set COLZ draw option, keep 0-bins white, and add bin labels for clear module borders
+    meDuplicatePixelOccupancyBarrelLayer_[i]->setOption("colz");
+    meDuplicatePixelOccupancyBarrelLayer_[i]->getTH2F()->SetMinimum(0.001);
+    for (int j = 1; j <= nModulesPerLadder + 1; j++) {
+      meDuplicatePixelOccupancyBarrelLayer_[i]->setBinLabel(j, std::to_string(j - 5), 1);
+    }
+  }
 
-  // HLT monitoring - trends vs lumisection
   iBooker.setCurrentFolder(topFolderName_ + "/DuplicatePixels/HLT");
+  meDuplicatePixelsPerEventVsLS_ = iBooker.bookProfile("DuplicatePixelsPerEventVsLS", "Duplicate Pixels per Event vs LS;Lumisection;Duplicate Pixels/Event", 2000, 0., 2000., 0., 500.);
+  meDuplicatePixelsFractionVsLS_ = iBooker.bookProfile("DuplicatePixelsFractionVsLS", "Duplicate Pixels Fraction vs LS;Lumisection;Duplicate Fraction", 2000, 0., 2000., 0., 1.0);
 
-  meDuplicatePixelsPerEventVsLS_ = iBooker.bookProfile("DuplicatePixelsPerEventVsLS",
-                                                        "Duplicate Pixels per Event vs LS;Lumisection;Duplicate Pixels/Event",
-                                                        2000,
-                                                        0.,
-                                                        2000.,
-                                                        0.,
-                                                        500.);
-
-  meDuplicatePixelsFractionVsLS_ = iBooker.bookProfile("DuplicatePixelsFractionVsLS",
-                                                        "Duplicate Pixels Fraction vs LS;Lumisection;Duplicate Fraction",
-                                                        2000,
-                                                        0.,
-                                                        2000.,
-                                                        0.,
-                                                        1.0);
-
-  edm::LogInfo("SiPixelFakeDigiMonitor") << "Histograms booked in " << topFolderName_ + "/FakeDigis and /DuplicatePixels";
+  edm::LogInfo("SiPixelFakeDigiMonitor") << "Histograms booked with per-layer Module vs Ladder occupancy maps.";
 }
 
 void SiPixelFakeDigiMonitor::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) {
   const TrackerTopology& tTopo = iSetup.getData(trackerTopoToken_);
-  const TrackerGeometry& trackerGeom = iSetup.getData(trackerGeomToken_);
 
   edm::Handle<SiPixelClustersHost> clustersSoA;
   iEvent.getByToken(clustersSoAToken_, clustersSoA);
 
-  if (!clustersSoA.isValid()) {
-    edm::LogWarning("SiPixelFakeDigiMonitor") << "ClustersSoA collection not valid";
-    return;
-  }
+  if (!clustersSoA.isValid()) return;
 
   edm::Handle<edm::DetSetVector<PixelDigi>> digis;
   iEvent.getByToken(digiToken_, digis);
 
   int totalDigis = 0;
   if (digis.isValid()) {
-    for (const auto& detSet : *digis) {
-      totalDigis += detSet.size();
-    }
+    for (const auto& detSet : *digis) totalDigis += detSet.size();
   }
 
   auto const& clusters_view = clustersSoA->const_view();
@@ -243,22 +164,21 @@ void SiPixelFakeDigiMonitor::analyze(const edm::Event& iEvent, const edm::EventS
 
   int totalFakeDigis = 0;
   int fakeDigisBarrel = 0;
-  int modulesWithFakeDigis = 0;
   std::vector<int> fakeDigisPerLayer(4, 0);
   std::vector<int> fakeDigisPerDisk(3, 0);
+  int modulesWithFakeDigis = 0;
 
   int totalDuplicatePixels = 0;
   int duplicatePixelsBarrel = 0;
   int duplicatePixelsEndcap = 0;
-  int modulesWithDuplicatePixels = 0;
   std::vector<int> duplicatePixelsPerLayer(4, 0);
   std::vector<int> duplicatePixelsPerDisk(3, 0);
+  int modulesWithDuplicatePixels = 0;
 
   for (uint32_t i = 1; i <= nModules; ++i) {
     uint32_t nFakeDigis = clusters_view[i].nFakeDigis();
     uint32_t nDuplicatePixels = clusters_view[i].nDuplicatePixels();
 
-    // Skip if no fake digis and no duplicate pixels
     if (nFakeDigis == 0 && nDuplicatePixels == 0) continue;
 
     uint32_t rawId = clusters_view[i].rawId();
@@ -266,102 +186,84 @@ void SiPixelFakeDigiMonitor::analyze(const edm::Event& iEvent, const edm::EventS
     if (detIdObj.det() != DetId::Tracker) continue;
 
     int subdet = detIdObj.subdetId();
-    const GeomDet* geomDet = trackerGeom.idToDet(detIdObj);
-    GlobalPoint gp;
-    if (geomDet) {
-      gp = geomDet->surface().toGlobal(LocalPoint(0, 0, 0));
-    }
 
-    // Process fake digis
     if (nFakeDigis > 0) {
       totalFakeDigis += nFakeDigis;
       modulesWithFakeDigis++;
       meFakeDigisPerModule_->Fill(nFakeDigis);
-
       if (subdet == static_cast<int>(PixelSubdetector::PixelBarrel)) {
         meFakeDigisPerModuleBarrel_->Fill(nFakeDigis);
         fakeDigisBarrel += nFakeDigis;
         int layer = tTopo.pxbLayer(detIdObj);
         if (layer >= 1 && layer <= 4) {
           fakeDigisPerLayer[layer - 1] += nFakeDigis;
-        }
-        if (geomDet) {
-          meFakeDigiOccupancyBarrel_->Fill(gp.z(), gp.phi());
+          unsigned int module = tTopo.pxbModule(detIdObj);
+          unsigned int ladder = tTopo.pxbLadder(detIdObj);
+          const unsigned int nLaddersPerLayer[4] = {12, 28, 44, 64};
+          unsigned int halfLadders = nLaddersPerLayer[layer - 1] / 2;
+          int signedLadder = (ladder <= halfLadders)
+                                 ? static_cast<int>(ladder) - static_cast<int>(halfLadders) - 1
+                                 : static_cast<int>(ladder) - static_cast<int>(halfLadders);
+          int signedModule = (module <= 4u) ? static_cast<int>(module) - 5 : static_cast<int>(module) - 4;
+          meFakeDigiOccupancyBarrelLayer_[layer - 1]->Fill(signedModule, signedLadder);
         }
       } else if (subdet == static_cast<int>(PixelSubdetector::PixelEndcap)) {
         int disk = tTopo.pxfDisk(detIdObj);
-        if (disk >= 1 && disk <= 3) {
-          fakeDigisPerDisk[disk - 1] += nFakeDigis;
-        }
+        if (disk >= 1 && disk <= 3) fakeDigisPerDisk[disk - 1] += nFakeDigis;
       }
     }
 
-    // Process duplicate pixels
     if (nDuplicatePixels > 0) {
       totalDuplicatePixels += nDuplicatePixels;
       modulesWithDuplicatePixels++;
       meDuplicatePixelsPerModule_->Fill(nDuplicatePixels);
-
       if (subdet == static_cast<int>(PixelSubdetector::PixelBarrel)) {
         meDuplicatePixelsPerModuleBarrel_->Fill(nDuplicatePixels);
         duplicatePixelsBarrel += nDuplicatePixels;
         int layer = tTopo.pxbLayer(detIdObj);
         if (layer >= 1 && layer <= 4) {
           duplicatePixelsPerLayer[layer - 1] += nDuplicatePixels;
-        }
-        if (geomDet) {
-          meDuplicatePixelOccupancyBarrel_->Fill(gp.z(), gp.phi());
+          unsigned int module = tTopo.pxbModule(detIdObj);
+          unsigned int ladder = tTopo.pxbLadder(detIdObj);
+          const unsigned int nLaddersPerLayer[4] = {12, 28, 44, 64};
+          unsigned int halfLadders = nLaddersPerLayer[layer - 1] / 2;
+          int signedLadder = (ladder <= halfLadders)
+                                 ? static_cast<int>(ladder) - static_cast<int>(halfLadders) - 1
+                                 : static_cast<int>(ladder) - static_cast<int>(halfLadders);
+          int signedModule = (module <= 4u) ? static_cast<int>(module) - 5 : static_cast<int>(module) - 4;
+          meDuplicatePixelOccupancyBarrelLayer_[layer - 1]->Fill(signedModule, signedLadder);
         }
       } else if (subdet == static_cast<int>(PixelSubdetector::PixelEndcap)) {
         meDuplicatePixelsPerModuleEndcap_->Fill(nDuplicatePixels);
         duplicatePixelsEndcap += nDuplicatePixels;
         int disk = tTopo.pxfDisk(detIdObj);
-        if (disk >= 1 && disk <= 3) {
-          duplicatePixelsPerDisk[disk - 1] += nDuplicatePixels;
-        }
+        if (disk >= 1 && disk <= 3) duplicatePixelsPerDisk[disk - 1] += nDuplicatePixels;
       }
     }
   }
 
-  // Fill event-level histograms for fake digis
+  // Event-level fills
   meFakeDigisPerEvent_->Fill(totalFakeDigis);
   meModulesWithFakeDigis_->Fill(modulesWithFakeDigis);
   meNFakeDigisBarrel_->Fill(fakeDigisBarrel);
-
-  // Fill event-level histograms for duplicate pixels
   meDuplicatePixelsPerEvent_->Fill(totalDuplicatePixels);
   meModulesWithDuplicatePixels_->Fill(modulesWithDuplicatePixels);
   meNDuplicatePixelsBarrel_->Fill(duplicatePixelsBarrel);
   meNDuplicatePixelsEndcap_->Fill(duplicatePixelsEndcap);
 
-  // LS Monitoring Accumulation
+  // LS Accumulation
   fakeDigisThisLS_ += totalFakeDigis;
   duplicatePixelsThisLS_ += totalDuplicatePixels;
   totalDigisThisLS_ += totalDigis;
   eventsThisLS_++;
 
-  // Fill per-layer/disk histograms for fake digis
   for (int i = 0; i < 4; i++) {
-    if (fakeDigisPerLayer[i] > 0) {
-      meNFakeDigisLayer_[i]->Fill(fakeDigisPerLayer[i]);
-    }
+    if (fakeDigisPerLayer[i] > 0) meNFakeDigisLayer_[i]->Fill(fakeDigisPerLayer[i]);
+    if (duplicatePixelsPerLayer[i] > 0) meNDuplicatePixelsLayer_[i]->Fill(duplicatePixelsPerLayer[i]);
   }
   for (int i = 0; i < 3; i++) {
-    if (fakeDigisPerDisk[i] > 0) {
-      meNFakeDigisDisk_[i]->Fill(fakeDigisPerDisk[i]);
-    }
-  }
-
-  // Fill per-layer/disk histograms for duplicate pixels
-  for (int i = 0; i < 4; i++) {
-    if (duplicatePixelsPerLayer[i] > 0) {
-      meNDuplicatePixelsLayer_[i]->Fill(duplicatePixelsPerLayer[i]);
-    }
-  }
-  for (int i = 0; i < 3; i++) {
-    if (duplicatePixelsPerDisk[i] > 0) {
-      meNDuplicatePixelsDisk_[i]->Fill(duplicatePixelsPerDisk[i]);
-    }
+    if (fakeDigisPerDisk[i] > 0) meNFakeDigisDisk_[i]->Fill(fakeDigisPerDisk[i]);
+    if (duplicatePixelsPerDisk[i] > 0) meNDuplicatePixelsDisk_[i]->Fill(duplicatePixelsPerDisk[i]);
   }
 }
 
