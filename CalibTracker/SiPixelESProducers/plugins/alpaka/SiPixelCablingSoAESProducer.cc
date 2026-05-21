@@ -75,10 +75,18 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
               mapView[index].rawId() = pixelRoc->rawId();
               mapView[index].rocInDet() = pixelRoc->idInDetUnit();
               mapView[index].modToUnpDefault() = false;
-              if (quality != nullptr)
+              if (quality != nullptr) {
                 mapView[index].badRocs() = quality->IsRocBad(pixelRoc->rawId(), pixelRoc->idInDetUnit());
-              else
+                // Quality-excluded ROCs: set rawId/rocInDet to invalid so the geometry
+                // loop below assigns moduleId = invalidModuleId consistently, keeping
+                // the SoA mapping in sync with the quality-filtered view of the detector.
+                if (mapView[index].badRocs()) {
+                  mapView[index].rawId() = pixelClustering::invalidModuleId;
+                  mapView[index].rocInDet() = pixelClustering::invalidModuleId;
+                }
+              } else {
                 mapView[index].badRocs() = false;
+              }
             } else {  // store some dummy number
               mapView[index].rawId() = pixelClustering::invalidModuleId;
               mapView[index].rocInDet() = pixelClustering::invalidModuleId;
@@ -106,6 +114,9 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
           auto gdet = trackerGeom->idToDetUnit(mapView[i].rawId());
           if (!gdet) {
             LogDebug("SiPixelCablingSoAESProducer") << " Not found: " << mapView[i].rawId() << std::endl;
+            // Ensure moduleId is not left uninitialized; pixels hitting this slot
+            // are discarded by CountModules which skips invalidModuleId.
+            mapView[i].moduleId() = pixelClustering::invalidModuleId;
             continue;
           }
           mapView[i].moduleId() = gdet->index();

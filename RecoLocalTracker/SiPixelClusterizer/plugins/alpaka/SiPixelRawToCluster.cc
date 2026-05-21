@@ -11,7 +11,9 @@
 #include "CalibTracker/Records/interface/SiPixelGainCalibrationForHLTSoARcd.h"
 #include "CalibTracker/Records/interface/SiPixelMappingSoARecord.h"
 #include "CondFormats/DataRecord/interface/SiPixelFedCablingMapRcd.h"
+#include "CondFormats/DataRecord/interface/SiPixelQualityRcd.h"
 #include "CondFormats/SiPixelObjects/interface/SiPixelFedCablingMap.h"
+#include "CondFormats/SiPixelObjects/interface/SiPixelQuality.h"
 #include "CondFormats/SiPixelObjects/interface/SiPixelFedCablingTree.h"
 #include "CondFormats/SiPixelObjects/interface/alpaka/SiPixelGainCalibrationForHLTDevice.h"
 #include "CondFormats/SiPixelObjects/interface/alpaka/SiPixelMappingDevice.h"
@@ -154,6 +156,8 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
 
     edm::ESWatcher<SiPixelFedCablingMapRcd> recordWatcher_;
     edm::ESWatcher<TrackerTopologyRcd> trackerTopologyWatcher_;
+    edm::ESWatcher<SiPixelQualityRcd> qualityWatcher_;
+    edm::ESGetToken<SiPixelQuality, SiPixelQualityRcd> qualityToken_;
     const device::ESGetToken<SiPixelMappingDevice, SiPixelMappingSoARecord> mapToken_;
     const device::ESGetToken<SiPixelGainCalibrationForHLTDevice, SiPixelGainCalibrationForHLTSoARcd> gainsToken_;
     const edm::ESGetToken<SiPixelFedCablingMap, SiPixelFedCablingMapRcd> cablingMapToken_;
@@ -209,6 +213,12 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
     }
     digiMorphingConfig_.applyDigiMorphing = iConfig.getParameter<bool>("DoDigiMorphing");
     digiMorphingConfig_.maxFakesInModule = iConfig.getParameter<uint32_t>("MaxFakesInModule");
+
+    // Consume quality only when both quality filtering and morphing are active,
+    // so the morphing module list stays in sync with the quality-filtered hMap.
+    if (useQuality_ && digiMorphingConfig_.applyDigiMorphing) {
+      qualityToken_ = esConsumes<SiPixelQuality, SiPixelQualityRcd>();
+    }
 
     if (digiMorphingConfig_.maxFakesInModule > TrackerTraits::maxPixInModuleForMorphing) {
       throw cms::Exception("Configuration")
@@ -268,22 +278,45 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
     auto const& dGains = iSetup.getData(gainsToken_);
 
     // initialize cabling map or update if necessary
-    if (recordWatcher_.check(iSetup) || trackerTopologyWatcher_.check(iSetup)) {
+    if (recordWatcher_.check(iSetup) || trackerTopologyWatcher_.check(iSetup) ||
+        (useQuality_ && digiMorphingConfig_.applyDigiMorphing && qualityWatcher_.check(iSetup))) {
       // cabling map, which maps online address (fed->link->ROC->local pixel) to offline (DetId->global pixel)
       cablingMap_ = &iSetup.getData(cablingMapToken_);
       fedIds_ = cablingMap_->fedIds();
       cabling_ = cablingMap_->cablingTree();
       LogDebug("map version:") << cablingMap_->version();
       const TrackerTopology* tTopo_ = &iSetup.getData(trackerTopologyToken_);
+
+      // Fetch quality to filter the morphing list consistently with hMap.
+      // Without this, det2fedMap() returns all modules regardless of quality,
+      // diverging from the quality-filtered SiPixelMappingDevice used for unpacking.
+      const SiPixelQuality* quality = nullptr;
+      if (useQuality_ && digiMorphingConfig_.applyDigiMorphing) {
+        quality = &iSetup.getData(qualityToken_);
+      }
+
       // collect morphing module ids on host, then copy once to device
       std::vector<uint32_t> morphingModulesHost;
-      for (const auto& connection : cablingMap_->det2fedMap()) {
-        auto rawId = connection.first;
-        if (rawId == 0)
-          continue;
-        DetId detId(rawId);
-        if (!SiPixelRawToCluster::skipDetId(tTopo_, detId, theBarrelRegions_, theEndcapRegions_)) {
-          morphingModulesHost.push_back(rawId);
+      if (digiMorphingConfig_.applyDigiMorphing) {
+        for (const auto& connection : cablingMap_->det2fedMap()) {
+          auto rawId = connection.first;
+          if (rawId == 0)
+            continue;
+          DetId detId(rawId);
+          if (!SiPixelRawToCluster::skipDetId(tTopo_, detId, theBarrelRegions_, theEndcapRegions_)) {
+            // Skip modules where quality has excluded all ROCs — they produce no
+            // pixels in hMap and should not be morphed.
+            if (quality != nullptr) {
+              bool allBad = true;
+              for (short roc = 0; roc < 16 && allBad; ++roc) {
+                if (!quality->IsRocBad(rawId, roc))
+                  allBad = false;
+              }
+              if (allBad)
+                continue;
+            }
+            morphingModulesHost.push_back(rawId);
+          }
         }
       }
 
