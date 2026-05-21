@@ -2,6 +2,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <algorithm>
@@ -11,10 +12,9 @@
 #include "CalibTracker/Records/interface/SiPixelGainCalibrationForHLTSoARcd.h"
 #include "CalibTracker/Records/interface/SiPixelMappingSoARecord.h"
 #include "CondFormats/DataRecord/interface/SiPixelFedCablingMapRcd.h"
-#include "CondFormats/DataRecord/interface/SiPixelQualityRcd.h"
 #include "CondFormats/SiPixelObjects/interface/SiPixelFedCablingMap.h"
-#include "CondFormats/SiPixelObjects/interface/SiPixelQuality.h"
 #include "CondFormats/SiPixelObjects/interface/SiPixelFedCablingTree.h"
+#include "CondFormats/SiPixelObjects/interface/SiPixelMappingHost.h"
 #include "CondFormats/SiPixelObjects/interface/alpaka/SiPixelGainCalibrationForHLTDevice.h"
 #include "CondFormats/SiPixelObjects/interface/alpaka/SiPixelMappingDevice.h"
 #include "CondFormats/SiPixelObjects/interface/alpaka/SiPixelMappingUtilities.h"
@@ -156,8 +156,8 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
 
     edm::ESWatcher<SiPixelFedCablingMapRcd> recordWatcher_;
     edm::ESWatcher<TrackerTopologyRcd> trackerTopologyWatcher_;
-    edm::ESWatcher<SiPixelQualityRcd> qualityWatcher_;
-    edm::ESGetToken<SiPixelQuality, SiPixelQualityRcd> qualityToken_;
+    edm::ESWatcher<SiPixelMappingSoARecord> mappingSoAWatcher_;
+    edm::ESGetToken<SiPixelMappingHost, SiPixelMappingSoARecord> mapHostToken_;
     const device::ESGetToken<SiPixelMappingDevice, SiPixelMappingSoARecord> mapToken_;
     const device::ESGetToken<SiPixelGainCalibrationForHLTDevice, SiPixelGainCalibrationForHLTSoARcd> gainsToken_;
     const edm::ESGetToken<SiPixelFedCablingMap, SiPixelFedCablingMapRcd> cablingMapToken_;
@@ -214,10 +214,10 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
     digiMorphingConfig_.applyDigiMorphing = iConfig.getParameter<bool>("DoDigiMorphing");
     digiMorphingConfig_.maxFakesInModule = iConfig.getParameter<uint32_t>("MaxFakesInModule");
 
-    // Consume quality only when both quality filtering and morphing are active,
-    // so the morphing module list stays in sync with the quality-filtered hMap.
-    if (useQuality_ && digiMorphingConfig_.applyDigiMorphing) {
-      qualityToken_ = esConsumes<SiPixelQuality, SiPixelQualityRcd>();
+    // Consume the host-side SiPixelMappingHost to build the morphing list directly
+    // from the same source used for unpacking, including any quality filtering.
+    if (digiMorphingConfig_.applyDigiMorphing) {
+      mapHostToken_ = esConsumes<SiPixelMappingHost, SiPixelMappingSoARecord>();
     }
 
     if (digiMorphingConfig_.maxFakesInModule > TrackerTraits::maxPixInModuleForMorphing) {
@@ -279,7 +279,7 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
 
     // initialize cabling map or update if necessary
     if (recordWatcher_.check(iSetup) || trackerTopologyWatcher_.check(iSetup) ||
-        (useQuality_ && digiMorphingConfig_.applyDigiMorphing && qualityWatcher_.check(iSetup))) {
+        (digiMorphingConfig_.applyDigiMorphing && mappingSoAWatcher_.check(iSetup))) {
       // cabling map, which maps online address (fed->link->ROC->local pixel) to offline (DetId->global pixel)
       cablingMap_ = &iSetup.getData(cablingMapToken_);
       fedIds_ = cablingMap_->fedIds();
@@ -287,36 +287,27 @@ namespace ALPAKA_ACCELERATOR_NAMESPACE {
       LogDebug("map version:") << cablingMap_->version();
       const TrackerTopology* tTopo_ = &iSetup.getData(trackerTopologyToken_);
 
-      // Fetch quality to filter the morphing list consistently with hMap.
-      // Without this, det2fedMap() returns all modules regardless of quality,
-      // diverging from the quality-filtered SiPixelMappingDevice used for unpacking.
-      const SiPixelQuality* quality = nullptr;
-      if (useQuality_ && digiMorphingConfig_.applyDigiMorphing) {
-        quality = &iSetup.getData(qualityToken_);
-      }
-
       // collect morphing module ids on host, then copy once to device
       std::vector<uint32_t> morphingModulesHost;
       if (digiMorphingConfig_.applyDigiMorphing) {
-        for (const auto& connection : cablingMap_->det2fedMap()) {
-          auto rawId = connection.first;
-          if (rawId == 0)
+        // Build the morphing list directly from SiPixelMappingHost — the same
+        // source used for unpacking — so quality filtering, cabling changes, and
+        // any other masking are automatically reflected without a separate pass
+        // over det2fedMap() with manual quality cross-checks.
+        auto const& hMapHost = iSetup.getData(mapHostToken_);
+        auto hMapView = hMapHost.const_view();
+        std::unordered_set<uint32_t> seenRawIds;
+        for (int i = 1; i <= static_cast<int>(hMapView.size()); ++i) {
+          uint32_t rawId = hMapView[i].rawId();
+          if (rawId == pixelClustering::invalidModuleId)
             continue;
+          if (hMapView[i].badRocs())
+            continue;
+          if (!seenRawIds.insert(rawId).second)
+            continue;  // already processed this module
           DetId detId(rawId);
-          if (!SiPixelRawToCluster::skipDetId(tTopo_, detId, theBarrelRegions_, theEndcapRegions_)) {
-            // Skip modules where quality has excluded all ROCs — they produce no
-            // pixels in hMap and should not be morphed.
-            if (quality != nullptr) {
-              bool allBad = true;
-              for (short roc = 0; roc < 16 && allBad; ++roc) {
-                if (!quality->IsRocBad(rawId, roc))
-                  allBad = false;
-              }
-              if (allBad)
-                continue;
-            }
+          if (!SiPixelRawToCluster::skipDetId(tTopo_, detId, theBarrelRegions_, theEndcapRegions_))
             morphingModulesHost.push_back(rawId);
-          }
         }
       }
 
