@@ -29,6 +29,7 @@ private:
   const std::string signalFlavour_;
   const bool dodifferentialPlots_;
   const double discrCut_;
+  const std::string kinematicsTag_;
 
   const bool etaActive_;
   const double etaMin_;
