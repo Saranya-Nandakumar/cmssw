@@ -33,7 +33,10 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
       minDecayLength(pSet.getParameter<double>("MinDecayLength")),
       maxDecayLength(pSet.getParameter<double>("MaxDecayLength")),
       minJetDistance(pSet.getParameter<double>("MinJetDistance")),
-      maxJetDistance(pSet.getParameter<double>("MaxJetDistance")) {
+      maxJetDistance(pSet.getParameter<double>("MaxJetDistance")),
+      wideRangeHistograms_(pSet.getParameter<std::vector<std::string>>("WideRangeHistograms")),
+      wideIPBound_(pSet.getParameter<double>("WideIPBound")),
+      wideIPSBound_(pSet.getParameter<double>("WideIPSBound")) {
   const std::string trackIPDir(theExtensionString.substr(1));
 
   if (willFinalize_)
@@ -43,9 +46,9 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
   // 3D
   trkNbr3D = std::make_unique<TrackIPHistograms<int>>("selTrksNbr_3D" + theExtensionString,
                                                       "Number of selected tracks for 3D IPS",
-                                                      31,
+                                                      41,
                                                       -0.5,
-                                                      30.5,
+                                                      40.5,
                                                       false,
                                                       true,
                                                       true,
@@ -58,9 +61,9 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
   // 2D
   trkNbr2D = std::make_unique<TrackIPHistograms<int>>("selTrksNbr_2D" + theExtensionString,
                                                       "Number of selected tracks for 2D IPS",
-                                                      31,
+                                                      41,
                                                       -0.5,
-                                                      30.5,
+                                                      40.5,
                                                       false,
                                                       true,
                                                       true,
@@ -73,12 +76,16 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
   // IP significance
   // 3D
   for (unsigned int i = 1; i <= 4; i++) {
+    const std::string name = "ips" + std::to_string(i) + "_3D";
+    const int nBins = nBinsFor(name, nBinsIPS, lowerIPSBound, upperIPSBound, wideIPSBound_);
+    const double lower = lowerFor(name, lowerIPSBound, wideIPSBound_);
+    const double upper = upperFor(name, upperIPSBound, wideIPSBound_);
     tkcntHistosSig3D.push_back(
-        std::make_unique<TrackIPHistograms<double>>("ips" + std::to_string(i) + "_3D" + theExtensionString,
+        std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
                                                     "3D IP significance " + std::to_string(i) + ".trk",
-                                                    nBinsIPS,
-                                                    lowerIPSBound,
-                                                    upperIPSBound,
+                                                    nBins,
+                                                    lower,
+                                                    upper,
                                                     false,
                                                     true,
                                                     true,
@@ -88,28 +95,38 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
                                                     makeQualityPlots_,
                                                     ibook_));
   }
-  tkcntHistosSig3D.push_back(std::make_unique<TrackIPHistograms<double>>("ips_3D" + theExtensionString,
-                                                                         "3D IP significance",
-                                                                         nBinsIPS,
-                                                                         lowerIPSBound,
-                                                                         upperIPSBound,
-                                                                         false,
-                                                                         true,
-                                                                         true,
-                                                                         "b",
-                                                                         trackIPDir,
-                                                                         mc,
-                                                                         makeQualityPlots_,
-                                                                         ibook_));
+  {
+    const std::string name = "ips_3D";
+    const int nBins = nBinsFor(name, nBinsIPS, lowerIPSBound, upperIPSBound, wideIPSBound_);
+    const double lower = lowerFor(name, lowerIPSBound, wideIPSBound_);
+    const double upper = upperFor(name, upperIPSBound, wideIPSBound_);
+    tkcntHistosSig3D.push_back(std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
+                                                                           "3D IP significance",
+                                                                           nBins,
+                                                                           lower,
+                                                                           upper,
+                                                                           false,
+                                                                           true,
+                                                                           true,
+                                                                           "b",
+                                                                           trackIPDir,
+                                                                           mc,
+                                                                           makeQualityPlots_,
+                                                                           ibook_));
+  }
 
   //2D
   for (unsigned int i = 1; i <= 4; i++) {
+    const std::string name = "ips" + std::to_string(i) + "_2D";
+    const int nBins = nBinsFor(name, nBinsIPS, lowerIPSBound, upperIPSBound, wideIPSBound_);
+    const double lower = lowerFor(name, lowerIPSBound, wideIPSBound_);
+    const double upper = upperFor(name, upperIPSBound, wideIPSBound_);
     tkcntHistosSig2D.push_back(
-        std::make_unique<TrackIPHistograms<double>>("ips" + std::to_string(i) + "_2D" + theExtensionString,
+        std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
                                                     "2D IP significance " + std::to_string(i) + ".trk",
-                                                    nBinsIPS,
-                                                    lowerIPSBound,
-                                                    upperIPSBound,
+                                                    nBins,
+                                                    lower,
+                                                    upper,
                                                     false,
                                                     true,
                                                     true,
@@ -120,84 +137,108 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
                                                     ibook_));
   }
 
-  tkcntHistosSig2D.push_back(std::make_unique<TrackIPHistograms<double>>("ips_2D" + theExtensionString,
-                                                                         "2D IP significance",
-                                                                         nBinsIPS,
-                                                                         lowerIPSBound,
-                                                                         upperIPSBound,
-                                                                         false,
-                                                                         true,
-                                                                         true,
-                                                                         "b",
-                                                                         trackIPDir,
-                                                                         mc,
-                                                                         makeQualityPlots_,
-                                                                         ibook_));
+  {
+    const std::string name = "ips_2D";
+    const int nBins = nBinsFor(name, nBinsIPS, lowerIPSBound, upperIPSBound, wideIPSBound_);
+    const double lower = lowerFor(name, lowerIPSBound, wideIPSBound_);
+    const double upper = upperFor(name, upperIPSBound, wideIPSBound_);
+    tkcntHistosSig2D.push_back(std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
+                                                                           "2D IP significance",
+                                                                           nBins,
+                                                                           lower,
+                                                                           upper,
+                                                                           false,
+                                                                           true,
+                                                                           true,
+                                                                           "b",
+                                                                           trackIPDir,
+                                                                           mc,
+                                                                           makeQualityPlots_,
+                                                                           ibook_));
+  }
 
   // IP value
   //3D
   for (unsigned int i = 1; i <= 4; i++) {
-    tkcntHistosVal3D.push_back(
-        std::make_unique<TrackIPHistograms<double>>("ip" + std::to_string(i) + "_3D" + theExtensionString,
-                                                    "3D IP value " + std::to_string(i) + ".trk",
-                                                    nBinsIP,
-                                                    lowerIPBound,
-                                                    upperIPBound,
-                                                    false,
-                                                    true,
-                                                    true,
-                                                    "b",
-                                                    trackIPDir,
-                                                    mc,
-                                                    makeQualityPlots_,
-                                                    ibook_));
+    const std::string name = "ip" + std::to_string(i) + "_3D";
+    const int nBins = nBinsFor(name, nBinsIP, lowerIPBound, upperIPBound, wideIPBound_);
+    const double lower = lowerFor(name, lowerIPBound, wideIPBound_);
+    const double upper = upperFor(name, upperIPBound, wideIPBound_);
+    tkcntHistosVal3D.push_back(std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
+                                                                           "3D IP value " + std::to_string(i) + ".trk",
+                                                                           nBins,
+                                                                           lower,
+                                                                           upper,
+                                                                           false,
+                                                                           true,
+                                                                           true,
+                                                                           "b",
+                                                                           trackIPDir,
+                                                                           mc,
+                                                                           makeQualityPlots_,
+                                                                           ibook_));
   }
 
-  tkcntHistosVal3D.push_back(std::make_unique<TrackIPHistograms<double>>("ip_3D" + theExtensionString,
-                                                                         "3D IP value",
-                                                                         nBinsIP,
-                                                                         lowerIPBound,
-                                                                         upperIPBound,
-                                                                         false,
-                                                                         true,
-                                                                         true,
-                                                                         "b",
-                                                                         trackIPDir,
-                                                                         mc,
-                                                                         makeQualityPlots_,
-                                                                         ibook_));
+  {
+    const std::string name = "ip_3D";
+    const int nBins = nBinsFor(name, nBinsIP, lowerIPBound, upperIPBound, wideIPBound_);
+    const double lower = lowerFor(name, lowerIPBound, wideIPBound_);
+    const double upper = upperFor(name, upperIPBound, wideIPBound_);
+    tkcntHistosVal3D.push_back(std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
+                                                                           "3D IP value",
+                                                                           nBins,
+                                                                           lower,
+                                                                           upper,
+                                                                           false,
+                                                                           true,
+                                                                           true,
+                                                                           "b",
+                                                                           trackIPDir,
+                                                                           mc,
+                                                                           makeQualityPlots_,
+                                                                           ibook_));
+  }
 
   //2D
   for (unsigned int i = 1; i <= 4; i++) {
-    tkcntHistosVal2D.push_back(
-        std::make_unique<TrackIPHistograms<double>>("ip" + std::to_string(i) + "_2D" + theExtensionString,
-                                                    "2D IP value " + std::to_string(i) + ".trk",
-                                                    nBinsIP,
-                                                    lowerIPBound,
-                                                    upperIPBound,
-                                                    false,
-                                                    true,
-                                                    true,
-                                                    "b",
-                                                    trackIPDir,
-                                                    mc,
-                                                    makeQualityPlots_,
-                                                    ibook_));
+    const std::string name = "ip" + std::to_string(i) + "_2D";
+    const int nBins = nBinsFor(name, nBinsIP, lowerIPBound, upperIPBound, wideIPBound_);
+    const double lower = lowerFor(name, lowerIPBound, wideIPBound_);
+    const double upper = upperFor(name, upperIPBound, wideIPBound_);
+    tkcntHistosVal2D.push_back(std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
+                                                                           "2D IP value " + std::to_string(i) + ".trk",
+                                                                           nBins,
+                                                                           lower,
+                                                                           upper,
+                                                                           false,
+                                                                           true,
+                                                                           true,
+                                                                           "b",
+                                                                           trackIPDir,
+                                                                           mc,
+                                                                           makeQualityPlots_,
+                                                                           ibook_));
   }
 
-  tkcntHistosVal2D.push_back(std::make_unique<TrackIPHistograms<double>>("ip_2D" + theExtensionString,
-                                                                         "2D IP value",
-                                                                         nBinsIP,
-                                                                         lowerIPBound,
-                                                                         upperIPBound,
-                                                                         false,
-                                                                         true,
-                                                                         true,
-                                                                         "b",
-                                                                         trackIPDir,
-                                                                         mc,
-                                                                         makeQualityPlots_,
-                                                                         ibook_));
+  {
+    const std::string name = "ip_2D";
+    const int nBins = nBinsFor(name, nBinsIP, lowerIPBound, upperIPBound, wideIPBound_);
+    const double lower = lowerFor(name, lowerIPBound, wideIPBound_);
+    const double upper = upperFor(name, upperIPBound, wideIPBound_);
+    tkcntHistosVal2D.push_back(std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
+                                                                           "2D IP value",
+                                                                           nBins,
+                                                                           lower,
+                                                                           upper,
+                                                                           false,
+                                                                           true,
+                                                                           true,
+                                                                           "b",
+                                                                           trackIPDir,
+                                                                           mc,
+                                                                           makeQualityPlots_,
+                                                                           ibook_));
+  }
 
   // IP error
   // 3D
@@ -465,9 +506,9 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
     tkcntHistosTkPt2D.push_back(
         std::make_unique<TrackIPHistograms<double>>("tkPt" + std::to_string(i) + "_2D" + theExtensionString,
                                                     "Track Pt 2D " + std::to_string(i) + ".trk",
-                                                    50,
+                                                    100,
                                                     -0.1,
-                                                    50.1,
+                                                    100.1,
                                                     false,
                                                     true,
                                                     true,
@@ -480,9 +521,9 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
 
   tkcntHistosTkPt2D.push_back(std::make_unique<TrackIPHistograms<double>>("tkPt_2D" + theExtensionString,
                                                                           "Track Pt 2D",
-                                                                          50,
+                                                                          100,
                                                                           -0.1,
-                                                                          50.1,
+                                                                          100.1,
                                                                           false,
                                                                           true,
                                                                           true,
@@ -497,9 +538,9 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
     tkcntHistosTkPt3D.push_back(
         std::make_unique<TrackIPHistograms<double>>("tkPt" + std::to_string(i) + "_3D" + theExtensionString,
                                                     "Track Pt 3D " + std::to_string(i) + ".trk",
-                                                    50,
+                                                    100,
                                                     -0.1,
-                                                    50.1,
+                                                    100.1,
                                                     false,
                                                     true,
                                                     true,
@@ -512,9 +553,9 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
 
   tkcntHistosTkPt3D.push_back(std::make_unique<TrackIPHistograms<double>>("tkPt_3D" + theExtensionString,
                                                                           "Track Pt 3D",
-                                                                          50,
+                                                                          100,
                                                                           -0.1,
-                                                                          50.1,
+                                                                          100.1,
                                                                           false,
                                                                           true,
                                                                           true,
@@ -844,10 +885,10 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
   trackMultVsJetPtHisto =
       std::make_unique<FlavourHistograms2D<double, int>>("trackMultVsJetPt" + theExtensionString,
                                                          "Track Multiplicity vs Jet Pt for Tracks Associated to Jets",
-                                                         50,
+                                                         100,
                                                          0.0,
-                                                         250.0,
-                                                         21,
+                                                         1000.0,
+                                                         31,
                                                          -0.5,
                                                          30.5,
                                                          false,
@@ -859,9 +900,9 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
   selectedTrackMultVsJetPtHisto = std::make_unique<FlavourHistograms2D<double, int>>(
       "selectedTrackMultVsJetPt" + theExtensionString,
       "Track Multiplicity vs Jet Pt for Selected Tracks Associated to Jets",
-      50,
+      100,
       0.0,
-      250.0,
+      1000.0,
       21,
       -0.5,
       20.5,
@@ -870,6 +911,27 @@ IPTagPlotter<Container, Base>::IPTagPlotter(const std::string& tagName,
       mc,
       true,
       ibook_);
+}
+
+template <class Container, class Base>
+bool IPTagPlotter<Container, Base>::isWideRange(const std::string& name) const {
+  return std::find(wideRangeHistograms_.begin(), wideRangeHistograms_.end(), name) != wideRangeHistograms_.end();
+}
+
+template <class Container, class Base>
+int IPTagPlotter<Container, Base>::nBinsFor(
+    const std::string& name, int nBins, double lower, double upper, double wideBound) const {
+  return isWideRange(name) ? std::lround(nBins * 2. * wideBound / (upper - lower)) : nBins;
+}
+
+template <class Container, class Base>
+double IPTagPlotter<Container, Base>::lowerFor(const std::string& name, double lower, double wideBound) const {
+  return isWideRange(name) ? -wideBound : lower;
+}
+
+template <class Container, class Base>
+double IPTagPlotter<Container, Base>::upperFor(const std::string& name, double upper, double wideBound) const {
+  return isWideRange(name) ? wideBound : upper;
 }
 
 template <class Container, class Base>
@@ -969,8 +1031,11 @@ void IPTagPlotter<Container, Base>::analyzeTag(const reco::BaseTagInfo* baseTagI
   }
   for (unsigned int n = selectedIndices.size(); n < 4; ++n) {
     const reco::TrackBase::TrackQuality trackQual = reco::TrackBase::undefQuality;
-    tkcntHistosSig2D[n]->fill(jetFlavour, trackQual, lowerIPSBound - 1.0, false, w);
-    tkcntHistosVal2D[n]->fill(jetFlavour, trackQual, lowerIPBound - 1.0, false, w);
+    // below the lower edge of each histogram (underflow)
+    const std::string rank = std::to_string(n + 1) + "_2D";
+    tkcntHistosSig2D[n]->fill(
+        jetFlavour, trackQual, lowerFor("ips" + rank, lowerIPSBound, wideIPSBound_) - 1.0, false, w);
+    tkcntHistosVal2D[n]->fill(jetFlavour, trackQual, lowerFor("ip" + rank, lowerIPBound, wideIPBound_) - 1.0, false, w);
     tkcntHistosErr2D[n]->fill(jetFlavour, trackQual, lowerIPEBound - 1.0, false, w);
   }
   sortedIndices = tagInfo->sortedIndexes(reco::btag::IP3DSig);
@@ -1049,8 +1114,11 @@ void IPTagPlotter<Container, Base>::analyzeTag(const reco::BaseTagInfo* baseTagI
   }
   for (unsigned int n = selectedIndices.size(); n < 4; ++n) {
     const reco::TrackBase::TrackQuality trackQual = reco::TrackBase::undefQuality;
-    tkcntHistosSig3D[n]->fill(jetFlavour, trackQual, lowerIPSBound - 1.0, false, w);
-    tkcntHistosVal3D[n]->fill(jetFlavour, trackQual, lowerIPBound - 1.0, false, w);
+    // below the lower edge of each histogram (underflow)
+    const std::string rank = std::to_string(n + 1) + "_3D";
+    tkcntHistosSig3D[n]->fill(
+        jetFlavour, trackQual, lowerFor("ips" + rank, lowerIPSBound, wideIPSBound_) - 1.0, false, w);
+    tkcntHistosVal3D[n]->fill(jetFlavour, trackQual, lowerFor("ip" + rank, lowerIPBound, wideIPBound_) - 1.0, false, w);
     tkcntHistosErr3D[n]->fill(jetFlavour, trackQual, lowerIPEBound - 1.0, false, w);
   }
   for (unsigned int n = 0; n != sortedTracks.size(); ++n) {
@@ -1076,12 +1144,16 @@ void IPTagPlotter<Container, Base>::finalize(DQMStore::IBooker& ibook_, DQMStore
   effPurFromHistos.clear();
 
   for (unsigned int i = 2; i <= 3; i++) {
+    const std::string name = "ips" + std::to_string(i) + "_3D";
+    const int nBins = nBinsFor(name, nBinsIPS, lowerIPSBound, upperIPSBound, wideIPSBound_);
+    const double lower = lowerFor(name, lowerIPSBound, wideIPSBound_);
+    const double upper = upperFor(name, upperIPSBound, wideIPSBound_);
     tkcntHistosSig3D.push_back(
-        std::make_unique<TrackIPHistograms<double>>("ips" + std::to_string(i) + "_3D" + theExtensionString,
+        std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
                                                     "3D IP significance " + std::to_string(i) + ".trk",
-                                                    nBinsIPS,
-                                                    lowerIPSBound,
-                                                    upperIPSBound,
+                                                    nBins,
+                                                    lower,
+                                                    upper,
                                                     "b",
                                                     trackIPDir,
                                                     mcPlots_,
@@ -1092,12 +1164,16 @@ void IPTagPlotter<Container, Base>::finalize(DQMStore::IBooker& ibook_, DQMStore
   }
 
   for (unsigned int i = 2; i <= 3; i++) {
+    const std::string name = "ips" + std::to_string(i) + "_2D";
+    const int nBins = nBinsFor(name, nBinsIPS, lowerIPSBound, upperIPSBound, wideIPSBound_);
+    const double lower = lowerFor(name, lowerIPSBound, wideIPSBound_);
+    const double upper = upperFor(name, upperIPSBound, wideIPSBound_);
     tkcntHistosSig2D.push_back(
-        std::make_unique<TrackIPHistograms<double>>("ips" + std::to_string(i) + "_2D" + theExtensionString,
+        std::make_unique<TrackIPHistograms<double>>(name + theExtensionString,
                                                     "2D IP significance " + std::to_string(i) + ".trk",
-                                                    nBinsIPS,
-                                                    lowerIPSBound,
-                                                    upperIPSBound,
+                                                    nBins,
+                                                    lower,
+                                                    upper,
                                                     "b",
                                                     trackIPDir,
                                                     mcPlots_,

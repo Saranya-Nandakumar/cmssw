@@ -89,6 +89,12 @@ bTagTrackIPAnalysisBlock = cms.PSet(
         NBinsIPS = cms.int32(100),
         NBinsIP = cms.int32(100),
         NBinsIPE = cms.int32(100),
+        # IP histograms with more than 2 % outside the range above on the RelVals (b-decay tails, PU jets):
+        # booked on +-WideIPBound / +-WideIPSBound with the same bin width
+        WideRangeHistograms = cms.vstring('ip_3D', 'ip1_3D', 'ip2_3D', 'ip3_3D', 'ip_2D', 'ip1_2D', 'ip2_2D',
+                                          'ips_3D', 'ips1_3D', 'ips2_3D', 'ips1_2D'),
+        WideIPBound = cms.double(0.3),
+        WideIPSBound = cms.double(100.0),
         MinDecayLength = cms.double(-9999.0),
         MaxDecayLength = cms.double(5.0),
         MinJetDistance = cms.double(0.0),

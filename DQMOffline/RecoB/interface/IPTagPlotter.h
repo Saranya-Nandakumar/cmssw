@@ -7,6 +7,11 @@
 #include "FWCore/ParameterSet/interface/ParameterSet.h"
 #include "DataFormats/BTauReco/interface/IPTagInfo.h"
 
+#include <algorithm>
+#include <cmath>
+#include <string>
+#include <vector>
+
 template <class Container, class Base>
 class IPTagPlotter : public BaseTagInfoPlotter {
 public:
@@ -63,6 +68,14 @@ private:
   double lowerIPSBound, upperIPSBound, lowerIPBound, upperIPBound, lowerIPEBound, upperIPEBound;
   int nBinsIPS, nBinsIP, nBinsIPE;
   double minDecayLength, maxDecayLength, minJetDistance, maxJetDistance;
+  // histograms (name without extension) booked on [-wideBound, wideBound] instead of [lower, upper],
+  // with the same bin width
+  std::vector<std::string> wideRangeHistograms_;
+  double wideIPBound_, wideIPSBound_;
+  bool isWideRange(const std::string& name) const;
+  int nBinsFor(const std::string& name, int nBins, double lower, double upper, double wideBound) const;
+  double lowerFor(const std::string& name, double lower, double wideBound) const;
+  double upperFor(const std::string& name, double upper, double wideBound) const;
 
   std::vector<std::unique_ptr<EffPurFromHistos>> effPurFromHistos;
 
