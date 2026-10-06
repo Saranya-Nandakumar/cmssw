@@ -67,7 +67,7 @@ JetTagPlotter::JetTagPlotter(const std::string& tagName,
 
     // reconstructed jet transverse momentum
     dJetRecPt_ = std::make_unique<FlavourHistograms<double>>(
-        "jetPt" + kes, "jet pt", 350, 0.0, 350.0, false, false, true, "b", kinematicsDir, mcPlots_, ibook);
+        "jetPt" + kes, "jet pt", 200, 0.0, 1000.0, false, false, true, "b", kinematicsDir, mcPlots_, ibook);
 
     // reconstructed jet eta
     dJetRecPseudoRapidity_ = std::make_unique<FlavourHistograms<double>>("jetEta" + kes,
@@ -118,12 +118,12 @@ JetTagPlotter::JetTagPlotter(const std::string& tagName,
                                                     mcPlots_,
                                                     ibook);
 
-    // jet pT larger than requested discrimnator cut; 25 GeV bins, bin edges aligned with jetPt (1 GeV)
+    // jet pT larger than requested discrimnator cut; 25 GeV bins, bin edges aligned with jetPt (5 GeV)
     dJetPtDiscrCut_ = std::make_unique<FlavourHistograms<double>>("jetPt_diffEff" + es,
                                                                   "Efficiency vs. jet pt for discriminator above cut",
-                                                                  14,
+                                                                  40,
                                                                   0.0,
-                                                                  350.0,
+                                                                  1000.0,
                                                                   false,
                                                                   false,
                                                                   true,
@@ -293,12 +293,12 @@ void JetTagPlotter::finalize(DQMStore::IBooker& ibook_, DQMStore::IGetter& igett
     dJetPseudoRapidityDiscrCut_->setEfficiencyFlag();
 
     dJetRecPt_ = std::make_unique<FlavourHistograms<double>>(
-        "jetPt" + kes, "jet pt", 350, 0.0, 350.0, "b", kinematicsDir, mcPlots_, igetter_);
+        "jetPt" + kes, "jet pt", 200, 0.0, 1000.0, "b", kinematicsDir, mcPlots_, igetter_);
     dJetPtDiscrCut_ = std::make_unique<FlavourHistograms<double>>("jetPt_diffEff" + es,
                                                                   "Efficiency vs. jet pt for discriminator above cut",
-                                                                  14,
+                                                                  40,
                                                                   0.0,
-                                                                  350.0,
+                                                                  1000.0,
                                                                   "b",
                                                                   jetTagDir,
                                                                   mcPlots_,
